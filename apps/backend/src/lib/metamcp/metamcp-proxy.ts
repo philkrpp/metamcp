@@ -42,6 +42,7 @@ import {
   createToolOverridesListToolsMiddleware,
   mapOverrideNameToOriginal,
 } from "./metamcp-middleware/tool-overrides.functional";
+import { isBackendSessionLostError } from "./session-error";
 import { parseToolName } from "./tool-name-parser";
 import { sanitizeName } from "./utils";
 
@@ -404,23 +405,23 @@ export const createServer = async (
       throw new Error(`Server UUID not found for tool: ${name}`);
     }
 
-    try {
-      const abortController = new AbortController();
+    const abortController = new AbortController();
 
-      // Get configurable timeout values
-      const resetTimeoutOnProgress =
-        await configService.getMcpResetTimeoutOnProgress();
-      const timeout = await configService.getMcpTimeout();
-      const maxTotalTimeout = await configService.getMcpMaxTotalTimeout();
+    // Get configurable timeout values
+    const resetTimeoutOnProgress =
+      await configService.getMcpResetTimeoutOnProgress();
+    const timeout = await configService.getMcpTimeout();
+    const maxTotalTimeout = await configService.getMcpMaxTotalTimeout();
 
-      const mcpRequestOptions: RequestOptions = {
-        signal: abortController.signal,
-        resetTimeoutOnProgress,
-        timeout,
-        maxTotalTimeout,
-      };
-      // Use the correct schema for tool calls
-      const result = await clientForTool.client.request(
+    const mcpRequestOptions: RequestOptions = {
+      signal: abortController.signal,
+      resetTimeoutOnProgress,
+      timeout,
+      maxTotalTimeout,
+    };
+
+    const callOnce = (session: ConnectedClient) =>
+      session.client.request(
         {
           method: "tools/call",
           params: {
@@ -433,16 +434,62 @@ export const createServer = async (
         mcpRequestOptions,
       );
 
-      // Cast the result to CallToolResult type
-      return result as CallToolResult;
+    try {
+      return (await callOnce(clientForTool)) as CallToolResult;
     } catch (error) {
-      console.error(
-        `Error calling tool "${name}" through ${
-          clientForTool.client.getServerVersion()?.name || "unknown"
-        }:`,
-        error,
+      if (!isBackendSessionLostError(error)) {
+        console.error(
+          `Error calling tool "${name}" through ${
+            clientForTool.client.getServerVersion()?.name || "unknown"
+          }:`,
+          error,
+        );
+        throw error;
+      }
+
+      console.warn(
+        `Backend reported session lost for server ${serverUuid} on tool "${name}"; invalidating pool and retrying once.`,
       );
-      throw error;
+
+      await mcpServerPool.invalidateServerConnection(sessionId, serverUuid);
+      delete toolToClient[name];
+
+      const serverParamsMap = await getMcpServers(
+        namespaceUuid,
+        includeInactiveServers,
+      );
+      const params = serverParamsMap[serverUuid];
+      if (!params) {
+        throw new Error(
+          `Cannot re-initialize session: server ${serverUuid} no longer present in namespace ${namespaceUuid}`,
+        );
+      }
+
+      const freshSession = await mcpServerPool.getSession(
+        sessionId,
+        serverUuid,
+        params,
+        namespaceUuid,
+      );
+      if (!freshSession) {
+        throw new Error(
+          `Failed to re-initialize session for server ${serverUuid} after backend session loss`,
+        );
+      }
+
+      toolToClient[name] = freshSession;
+
+      try {
+        return (await callOnce(freshSession)) as CallToolResult;
+      } catch (retryError) {
+        console.error(
+          `Error calling tool "${name}" through ${
+            freshSession.client.getServerVersion()?.name || "unknown"
+          } after session re-initialize:`,
+          retryError,
+        );
+        throw retryError;
+      }
     }
   };
 
