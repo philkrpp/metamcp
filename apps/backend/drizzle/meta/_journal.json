@@ -106,6 +106,13 @@
       "when": 1778556740366,
       "tag": "0014_jazzy_ultimates",
       "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1778585196241,
+      "tag": "0015_gorgeous_barracuda",
+      "breakpoints": true
     }
   ]
 }

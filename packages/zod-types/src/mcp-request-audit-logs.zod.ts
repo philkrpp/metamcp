@@ -7,6 +7,7 @@ export const ListMcpRequestAuditLogsRequestSchema = z.object({
   offset: z.number().int().min(0).optional(),
   endpointName: z.string().optional(),
   apiKeyUuid: z.string().uuid().optional(),
+  namespaceUuid: z.string().uuid().optional(),
   status: McpRequestAuditLogStatusSchema.optional(),
 });
 
@@ -32,6 +33,29 @@ export const McpRequestAuditLogEntrySchema = z.object({
 
 export const ListMcpRequestAuditLogsResponseSchema = z.object({
   logs: z.array(McpRequestAuditLogEntrySchema),
+  totalCount: z.number().int().min(0),
+  filters: z.object({
+    apiKeys: z.array(
+      z.object({
+        uuid: z.string().uuid().nullable(),
+        name: z.string().nullable(),
+        count: z.number().int().min(0),
+      }),
+    ),
+    namespaces: z.array(
+      z.object({
+        uuid: z.string().uuid().nullable(),
+        name: z.string().nullable(),
+        count: z.number().int().min(0),
+      }),
+    ),
+    statuses: z.array(
+      z.object({
+        status: McpRequestAuditLogStatusSchema,
+        count: z.number().int().min(0),
+      }),
+    ),
+  }),
 });
 
 export type McpRequestAuditLogStatus = z.infer<

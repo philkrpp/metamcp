@@ -1,7 +1,13 @@
 "use client";
 
 import { format } from "date-fns";
-import { History, RefreshCw, Search } from "lucide-react";
+import {
+  ChevronLeft,
+  ChevronRight,
+  History,
+  RefreshCw,
+  Search,
+} from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
@@ -16,6 +22,13 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   Table,
   TableBody,
   TableCell,
@@ -25,6 +38,9 @@ import {
 } from "@/components/ui/table";
 import { useTranslations } from "@/hooks/useTranslations";
 import { trpc } from "@/lib/trpc";
+
+const PAGE_SIZE = 25;
+const ALL_FILTER_VALUE = "all";
 
 function displayValue(value: string | null | undefined, fallback: string) {
   return value && value.trim() ? value : fallback;
@@ -36,11 +52,26 @@ export default function AuditLogsPage() {
     toolName: string;
     message: string;
   } | null>(null);
+  const [pageIndex, setPageIndex] = useState(0);
+  const [apiKeyUuid, setApiKeyUuid] = useState(ALL_FILTER_VALUE);
+  const [namespaceUuid, setNamespaceUuid] = useState(ALL_FILTER_VALUE);
+  const [status, setStatus] = useState<"all" | "SUCCESS" | "ERROR">("all");
+
   const auditLogsQuery = trpc.frontend.mcpRequestAuditLogs.list.useQuery({
-    limit: 100,
+    limit: PAGE_SIZE,
+    offset: pageIndex * PAGE_SIZE,
+    apiKeyUuid: apiKeyUuid === ALL_FILTER_VALUE ? undefined : apiKeyUuid,
+    namespaceUuid:
+      namespaceUuid === ALL_FILTER_VALUE ? undefined : namespaceUuid,
+    status: status === ALL_FILTER_VALUE ? undefined : status,
   });
 
   const logs = auditLogsQuery.data?.logs ?? [];
+  const totalCount = auditLogsQuery.data?.totalCount ?? 0;
+  const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
+  const filterOptions = auditLogsQuery.data?.filters;
+  const pageStart = totalCount === 0 ? 0 : pageIndex * PAGE_SIZE + 1;
+  const pageEnd = Math.min(totalCount, pageIndex * PAGE_SIZE + logs.length);
 
   const handleRefresh = async () => {
     try {
@@ -53,6 +84,10 @@ export default function AuditLogsPage() {
 
   const formatTimestamp = (timestamp: Date | string) => {
     return format(new Date(timestamp), "yyyy-MM-dd HH:mm:ss");
+  };
+
+  const resetPagination = () => {
+    setPageIndex(0);
   };
 
   return (
@@ -69,7 +104,7 @@ export default function AuditLogsPage() {
         </div>
         <div className="flex items-center gap-2">
           <Badge variant="outline">
-            {t("audit-logs:showing", { count: logs.length })}
+            {t("audit-logs:showing", { count: totalCount })}
           </Badge>
           <Button
             variant="outline"
@@ -86,8 +121,102 @@ export default function AuditLogsPage() {
       </div>
 
       <Card>
-        <CardHeader>
-          <CardTitle>{t("audit-logs:requestAudit")}</CardTitle>
+        <CardHeader className="gap-4">
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <CardTitle>{t("audit-logs:requestAudit")}</CardTitle>
+            <div className="text-sm text-muted-foreground">
+              {t("audit-logs:pageRange", {
+                start: pageStart,
+                end: pageEnd,
+                total: totalCount,
+              })}
+            </div>
+          </div>
+          <div className="grid gap-3 md:grid-cols-3">
+            <Select
+              value={apiKeyUuid}
+              onValueChange={(value) => {
+                setApiKeyUuid(value);
+                resetPagination();
+              }}
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder={t("audit-logs:filterApiKey")} />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL_FILTER_VALUE}>
+                  {t("audit-logs:allApiKeys")}
+                </SelectItem>
+                {filterOptions?.apiKeys
+                  .filter((apiKey) => apiKey.uuid)
+                  .map((apiKey) => (
+                    <SelectItem key={apiKey.uuid} value={apiKey.uuid!}>
+                      {displayValue(
+                        apiKey.name,
+                        apiKey.uuid ?? t("audit-logs:unknown"),
+                      )}{" "}
+                      ({apiKey.count})
+                    </SelectItem>
+                  ))}
+              </SelectContent>
+            </Select>
+
+            <Select
+              value={namespaceUuid}
+              onValueChange={(value) => {
+                setNamespaceUuid(value);
+                resetPagination();
+              }}
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder={t("audit-logs:filterNamespace")} />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL_FILTER_VALUE}>
+                  {t("audit-logs:allNamespaces")}
+                </SelectItem>
+                {filterOptions?.namespaces
+                  .filter((namespace) => namespace.uuid)
+                  .map((namespace) => (
+                    <SelectItem key={namespace.uuid} value={namespace.uuid!}>
+                      {displayValue(
+                        namespace.name,
+                        namespace.uuid ?? t("audit-logs:unknown"),
+                      )}{" "}
+                      ({namespace.count})
+                    </SelectItem>
+                  ))}
+              </SelectContent>
+            </Select>
+
+            <Select
+              value={status}
+              onValueChange={(value) => {
+                setStatus(value as "all" | "SUCCESS" | "ERROR");
+                resetPagination();
+              }}
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder={t("audit-logs:filterStatus")} />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL_FILTER_VALUE}>
+                  {t("audit-logs:allStatuses")}
+                </SelectItem>
+                {filterOptions?.statuses.map((statusOption) => (
+                  <SelectItem
+                    key={statusOption.status}
+                    value={statusOption.status}
+                  >
+                    {statusOption.status === "SUCCESS"
+                      ? t("audit-logs:success")
+                      : t("audit-logs:failed")}{" "}
+                    ({statusOption.count})
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
         </CardHeader>
         <CardContent>
           <div className="rounded-md border">
@@ -211,6 +340,36 @@ export default function AuditLogsPage() {
                 )}
               </TableBody>
             </Table>
+          </div>
+          <div className="mt-4 flex items-center justify-between gap-3">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setPageIndex((page) => Math.max(0, page - 1))}
+              disabled={pageIndex === 0 || auditLogsQuery.isFetching}
+            >
+              <ChevronLeft className="h-4 w-4" />
+              {t("audit-logs:previousPage")}
+            </Button>
+            <div className="text-sm text-muted-foreground">
+              {t("audit-logs:pageIndicator", {
+                page: pageIndex + 1,
+                totalPages,
+              })}
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() =>
+                setPageIndex((page) => Math.min(totalPages - 1, page + 1))
+              }
+              disabled={
+                pageIndex >= totalPages - 1 || auditLogsQuery.isFetching
+              }
+            >
+              {t("audit-logs:nextPage")}
+              <ChevronRight className="h-4 w-4" />
+            </Button>
           </div>
         </CardContent>
       </Card>

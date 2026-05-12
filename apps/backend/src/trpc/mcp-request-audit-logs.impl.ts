@@ -19,10 +19,11 @@ export const mcpRequestAuditLogsImplementations = {
         offset: input.offset,
         endpointName: input.endpointName,
         apiKeyUuid: input.apiKeyUuid,
+        namespaceUuid: input.namespaceUuid,
         status: input.status,
       });
 
-      return { logs };
+      return logs;
     } catch (error) {
       logger.error("Error fetching MCP request audit logs:", error);
       throw new Error("Failed to fetch MCP request audit logs");

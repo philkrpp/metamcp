@@ -444,6 +444,26 @@ export const mcpRequestAuditLogsTable = pgTable(
     ),
     index("mcp_request_audit_logs_tool_name_idx").on(table.tool_name),
     index("mcp_request_audit_logs_status_idx").on(table.status),
+    index("mcp_request_audit_logs_api_key_user_created_at_idx").on(
+      table.api_key_user_id,
+      table.created_at,
+    ),
+    index("mcp_request_audit_logs_oauth_user_created_at_idx").on(
+      table.oauth_user_id,
+      table.created_at,
+    ),
+    index("mcp_request_audit_logs_api_key_created_at_idx").on(
+      table.api_key_uuid,
+      table.created_at,
+    ),
+    index("mcp_request_audit_logs_namespace_created_at_idx").on(
+      table.namespace_uuid,
+      table.created_at,
+    ),
+    index("mcp_request_audit_logs_status_created_at_idx").on(
+      table.status,
+      table.created_at,
+    ),
   ],
 );
 
