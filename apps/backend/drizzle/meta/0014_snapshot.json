@@ -532,6 +532,18 @@
           "primaryKey": false,
           "notNull": false
         },
+        "mcp_server_uuid": {
+          "name": "mcp_server_uuid",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "mcp_server_name": {
+          "name": "mcp_server_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "tool_name": {
           "name": "tool_name",
           "type": "text",
@@ -671,6 +683,36 @@
           "method": "btree",
           "with": {}
         },
+        "mcp_request_audit_logs_mcp_server_uuid_idx": {
+          "name": "mcp_request_audit_logs_mcp_server_uuid_idx",
+          "columns": [
+            {
+              "expression": "mcp_server_uuid",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "mcp_request_audit_logs_mcp_server_name_idx": {
+          "name": "mcp_request_audit_logs_mcp_server_name_idx",
+          "columns": [
+            {
+              "expression": "mcp_server_name",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
         "mcp_request_audit_logs_tool_name_idx": {
           "name": "mcp_request_audit_logs_tool_name_idx",
           "columns": [
@@ -751,6 +793,19 @@
           ],
           "columnsTo": [
             "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "mcp_request_audit_logs_mcp_server_uuid_mcp_servers_uuid_fk": {
+          "name": "mcp_request_audit_logs_mcp_server_uuid_mcp_servers_uuid_fk",
+          "tableFrom": "mcp_request_audit_logs",
+          "tableTo": "mcp_servers",
+          "columnsFrom": [
+            "mcp_server_uuid"
+          ],
+          "columnsTo": [
+            "uuid"
           ],
           "onDelete": "set null",
           "onUpdate": "no action"
