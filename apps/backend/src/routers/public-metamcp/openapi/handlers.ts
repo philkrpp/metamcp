@@ -219,13 +219,13 @@ export const createMiddlewareEnabledHandlers = (
   )(originalListToolsHandler);
 
   const callToolWithMiddleware = compose(
+    createAuditCallToolMiddleware(),
     createFilterCallToolMiddleware({
       cacheEnabled: true,
       customErrorMessage: (toolName, reason) =>
         `Access denied to tool "${toolName}": ${reason}`,
     }),
     createToolOverridesCallToolMiddleware({ cacheEnabled: true }),
-    createAuditCallToolMiddleware(),
     // Add more middleware here as needed
     // createAuthorizationMiddleware(),
   )(originalCallToolHandler);
