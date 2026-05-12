@@ -2,6 +2,7 @@
 
 import {
   FileTerminal,
+  History,
   Key,
   Link as LinkIcon,
   Package,
@@ -69,6 +70,11 @@ const getMenuItems = (t: (key: string) => string, locale: SupportedLocale) => [
     title: t("navigation:apiKeys"),
     url: getLocalizedPath("/api-keys", locale),
     icon: Key,
+  },
+  {
+    title: t("navigation:auditLogs"),
+    url: getLocalizedPath("/audit-logs", locale),
+    icon: History,
   },
   {
     title: t("navigation:settings"),

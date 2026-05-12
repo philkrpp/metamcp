@@ -1,0 +1,23 @@
+{
+  "title": "审计日志",
+  "subtitle": "按 API Key、端点、MCP Server 和结果查看 MCP 工具调用",
+  "refreshSuccess": "审计日志已刷新",
+  "refreshError": "刷新审计日志失败",
+  "requestAudit": "请求审计",
+  "loading": "正在加载审计日志...",
+  "empty": "暂无审计日志",
+  "showing": "正在显示 {{count}} 条审计日志",
+  "timestamp": "时间",
+  "apiKey": "API Key",
+  "auth": "鉴权",
+  "endpoint": "端点",
+  "namespace": "命名空间",
+  "mcpServer": "MCP Server",
+  "tool": "工具",
+  "duration": "耗时",
+  "error": "错误",
+  "unknown": "未知",
+  "none": "无",
+  "success": "成功",
+  "failed": "失败"
+}

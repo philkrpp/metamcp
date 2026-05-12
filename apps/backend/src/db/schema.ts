@@ -411,6 +411,13 @@ export const mcpRequestAuditLogsTable = pgTable(
     oauth_user_id: text("oauth_user_id").references(() => usersTable.id, {
       onDelete: "set null",
     }),
+    mcp_server_uuid: uuid("mcp_server_uuid").references(
+      () => mcpServersTable.uuid,
+      {
+        onDelete: "set null",
+      },
+    ),
+    mcp_server_name: text("mcp_server_name"),
     tool_name: text("tool_name").notNull(),
     status: mcpRequestAuditStatusEnum("status").notNull(),
     duration_ms: integer("duration_ms").notNull(),
@@ -429,6 +436,12 @@ export const mcpRequestAuditLogsTable = pgTable(
       table.api_key_user_id,
     ),
     index("mcp_request_audit_logs_oauth_user_id_idx").on(table.oauth_user_id),
+    index("mcp_request_audit_logs_mcp_server_uuid_idx").on(
+      table.mcp_server_uuid,
+    ),
+    index("mcp_request_audit_logs_mcp_server_name_idx").on(
+      table.mcp_server_name,
+    ),
     index("mcp_request_audit_logs_tool_name_idx").on(table.tool_name),
     index("mcp_request_audit_logs_status_idx").on(table.status),
   ],

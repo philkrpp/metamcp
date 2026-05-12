@@ -21,6 +21,7 @@ export type Translations = {
   search: Record<string, any>;
   inspector: Record<string, any>;
   logs: Record<string, any>;
+  "audit-logs": Record<string, any>;
   validation: Record<string, any>;
 };
 
@@ -69,6 +70,8 @@ export async function loadTranslations(
       search: (await import("../public/locales/en/search.json")).default,
       inspector: (await import("../public/locales/en/inspector.json")).default,
       logs: (await import("../public/locales/en/logs.json")).default,
+      "audit-logs": (await import("../public/locales/en/audit-logs.json"))
+        .default,
       validation: (await import("../public/locales/en/validation.json"))
         .default,
     };
@@ -86,6 +89,7 @@ export async function loadTranslations(
       searchZh,
       inspectorZh,
       logsZh,
+      auditLogsZh,
       validationZh,
     ] = await Promise.all([
       import("../public/locales/zh/common.json").catch(() => ({ default: {} })),
@@ -113,6 +117,9 @@ export async function loadTranslations(
         default: {},
       })),
       import("../public/locales/zh/logs.json").catch(() => ({ default: {} })),
+      import("../public/locales/zh/audit-logs.json").catch(() => ({
+        default: {},
+      })),
       import("../public/locales/zh/validation.json").catch(() => ({
         default: {},
       })),
@@ -133,6 +140,10 @@ export async function loadTranslations(
       search: { ...englishDict.search, ...searchZh.default },
       inspector: { ...englishDict.inspector, ...inspectorZh.default },
       logs: { ...englishDict.logs, ...logsZh.default },
+      "audit-logs": {
+        ...englishDict["audit-logs"],
+        ...auditLogsZh.default,
+      },
       validation: { ...englishDict.validation, ...validationZh.default },
     };
   } else if (locale === "ko") {
@@ -149,6 +160,7 @@ export async function loadTranslations(
       searchKo,
       inspectorKo,
       logsKo,
+      auditLogsKo,
       validationKo,
     ] = await Promise.all([
       import("../public/locales/ko/common.json").catch(() => ({ default: {} })),
@@ -176,6 +188,9 @@ export async function loadTranslations(
         default: {},
       })),
       import("../public/locales/ko/logs.json").catch(() => ({ default: {} })),
+      import("../public/locales/ko/audit-logs.json").catch(() => ({
+        default: {},
+      })),
       import("../public/locales/ko/validation.json").catch(() => ({
         default: {},
       })),
@@ -196,6 +211,10 @@ export async function loadTranslations(
       search: { ...englishDict.search, ...searchKo.default },
       inspector: { ...englishDict.inspector, ...inspectorKo.default },
       logs: { ...englishDict.logs, ...logsKo.default },
+      "audit-logs": {
+        ...englishDict["audit-logs"],
+        ...auditLogsKo.default,
+      },
       validation: { ...englishDict.validation, ...validationKo.default },
     };
   } else {

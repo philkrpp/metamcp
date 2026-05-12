@@ -23,6 +23,7 @@ import {
   ListToolsHandler,
   MetaMCPHandlerContext,
 } from "../../../lib/metamcp/metamcp-middleware/functional-middleware";
+import { resolveToolIdentity } from "../../../lib/metamcp/metamcp-middleware/tool-identity";
 import {
   createToolOverridesCallToolMiddleware,
   createToolOverridesListToolsMiddleware,
@@ -219,7 +220,7 @@ export const createMiddlewareEnabledHandlers = (
   )(originalListToolsHandler);
 
   const callToolWithMiddleware = compose(
-    createAuditCallToolMiddleware(),
+    createAuditCallToolMiddleware({ resolveToolIdentity }),
     createFilterCallToolMiddleware({
       cacheEnabled: true,
       customErrorMessage: (toolName, reason) =>
