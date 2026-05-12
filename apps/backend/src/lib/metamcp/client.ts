@@ -175,6 +175,11 @@ export const connectMetaMcpClient = async (
   logger.info(
     `Connecting to server ${serverParams.name} (${serverParams.uuid}) with max attempts: ${maxAttempts}`,
   );
+  metamcpLogStore.addLog(
+    serverParams.name,
+    "info",
+    `Connecting to server ${serverParams.uuid} with max attempts: ${maxAttempts}`,
+  );
 
   while (retry) {
     let transport: Transport | undefined;
@@ -188,6 +193,11 @@ export const connectMetaMcpClient = async (
       if (isInErrorState) {
         logger.info(
           `Server ${serverParams.name} (${serverParams.uuid}) is already in ERROR state, skipping connection attempt`,
+        );
+        metamcpLogStore.addLog(
+          serverParams.name,
+          "warn",
+          `Server ${serverParams.uuid} is in ERROR state; skipping connection attempt`,
         );
         return undefined;
       }
@@ -210,6 +220,11 @@ export const connectMetaMcpClient = async (
           logger.info(
             `Process crashed for server ${serverParams.name} (${serverParams.uuid}): code=${exitCode}, signal=${signal}`,
           );
+          metamcpLogStore.addLog(
+            serverParams.name,
+            "error",
+            `Process crashed with code ${exitCode ?? "null"} and signal ${signal ?? "null"}`,
+          );
 
           // Notify the pool about the crash
           if (onProcessCrash) {
@@ -226,6 +241,11 @@ export const connectMetaMcpClient = async (
       }
 
       await client.connect(transport);
+      metamcpLogStore.addLog(
+        serverParams.name,
+        "info",
+        `Connected to server ${serverParams.uuid}`,
+      );
 
       return {
         client,
