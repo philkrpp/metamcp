@@ -19,5 +19,7 @@
   "unknown": "Unknown",
   "none": "None",
   "success": "Success",
-  "failed": "Failed"
+  "failed": "Failed",
+  "viewErrorDetails": "View error details",
+  "errorDetails": "Error Details"
 }

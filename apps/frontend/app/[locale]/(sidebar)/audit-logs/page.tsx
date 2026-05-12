@@ -1,12 +1,20 @@
 "use client";
 
 import { format } from "date-fns";
-import { History, RefreshCw } from "lucide-react";
+import { History, RefreshCw, Search } from "lucide-react";
+import { useState } from "react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   Table,
   TableBody,
@@ -24,6 +32,10 @@ function displayValue(value: string | null | undefined, fallback: string) {
 
 export default function AuditLogsPage() {
   const { t } = useTranslations();
+  const [selectedError, setSelectedError] = useState<{
+    toolName: string;
+    message: string;
+  } | null>(null);
   const auditLogsQuery = trpc.frontend.mcpRequestAuditLogs.list.useQuery({
     limit: 100,
   });
@@ -167,8 +179,32 @@ export default function AuditLogsPage() {
                         </Badge>
                       </TableCell>
                       <TableCell>{log.duration_ms} ms</TableCell>
-                      <TableCell className="max-w-[260px] truncate">
-                        {log.error_message ?? t("audit-logs:none")}
+                      <TableCell className="min-w-[280px] max-w-[420px] whitespace-normal">
+                        {log.error_message ? (
+                          <div className="flex items-start gap-2">
+                            <p className="line-clamp-2 flex-1 text-sm leading-5">
+                              {log.error_message}
+                            </p>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-7 shrink-0 px-2"
+                              onClick={() =>
+                                setSelectedError({
+                                  toolName: log.tool_name,
+                                  message: log.error_message!,
+                                })
+                              }
+                              title={t("audit-logs:viewErrorDetails")}
+                            >
+                              <Search className="h-3.5 w-3.5" />
+                            </Button>
+                          </div>
+                        ) : (
+                          <span className="text-muted-foreground">
+                            {t("audit-logs:none")}
+                          </span>
+                        )}
                       </TableCell>
                     </TableRow>
                   ))
@@ -178,6 +214,27 @@ export default function AuditLogsPage() {
           </div>
         </CardContent>
       </Card>
+
+      <Dialog
+        open={selectedError !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setSelectedError(null);
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>{t("audit-logs:errorDetails")}</DialogTitle>
+            <DialogDescription>
+              {selectedError?.toolName ?? t("audit-logs:unknown")}
+            </DialogDescription>
+          </DialogHeader>
+          <pre className="max-h-[420px] overflow-auto rounded-md border bg-muted p-4 text-sm whitespace-pre-wrap break-words">
+            {selectedError?.message}
+          </pre>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

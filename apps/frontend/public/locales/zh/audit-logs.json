@@ -19,5 +19,7 @@
   "unknown": "未知",
   "none": "无",
   "success": "成功",
-  "failed": "失败"
+  "failed": "失败",
+  "viewErrorDetails": "查看错误详情",
+  "errorDetails": "错误详情"
 }
