@@ -9,6 +9,13 @@ import {
 export interface MetaMCPHandlerContext {
   namespaceUuid: string;
   sessionId: string;
+  endpointName: string;
+  auth?: {
+    method: "api_key" | "oauth" | "none";
+    apiKeyUuid?: string;
+    apiKeyUserId?: string;
+    oauthUserId?: string;
+  };
 }
 
 // Handler function types

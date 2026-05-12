@@ -10,6 +10,7 @@ import { lookupEndpoint } from "@/middleware/lookup-endpoint-middleware";
 import { rateLimitMiddleware } from "@/middleware/rate-limit.middleware";
 import logger from "@/utils/logger";
 
+import { MetaMCPHandlerContext } from "../../lib/metamcp/metamcp-middleware/functional-middleware";
 import { metaMcpServerPool } from "../../lib/metamcp/metamcp-server-pool";
 import { SessionLifetimeManagerImpl } from "../../lib/session-lifetime-manager";
 
@@ -17,6 +18,20 @@ const sseRouter = express.Router();
 
 // Session lifetime manager for SSE sessions
 const sessionManager = new SessionLifetimeManagerImpl<Transport>("SSE");
+
+function getRequestContext(
+  req: ApiKeyAuthenticatedRequest,
+): Pick<MetaMCPHandlerContext, "endpointName" | "auth"> {
+  return {
+    endpointName: req.endpointName,
+    auth: {
+      method: req.authMethod || "none",
+      apiKeyUuid: req.apiKeyUuid,
+      apiKeyUserId: req.apiKeyUserId,
+      oauthUserId: req.oauthUserId,
+    },
+  };
+}
 
 // Cleanup function for a specific session
 const cleanupSession = async (sessionId: string, transport?: Transport) => {
@@ -76,6 +91,8 @@ sseRouter.get(
       const mcpServerInstance = await metaMcpServerPool.getServer(
         sessionId,
         namespaceUuid,
+        false,
+        getRequestContext(authReq),
       );
       if (!mcpServerInstance) {
         throw new Error("Failed to get MetaMCP server instance from pool");

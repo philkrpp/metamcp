@@ -31,6 +31,10 @@ export const mcpServerErrorStatusEnum = pgEnum(
   "mcp_server_error_status",
   McpServerErrorStatusEnum.options,
 );
+export const mcpRequestAuditStatusEnum = pgEnum("mcp_request_audit_status", [
+  "SUCCESS",
+  "ERROR",
+]);
 
 export const mcpServersTable = pgTable(
   "mcp_servers",
@@ -382,6 +386,51 @@ export const apiKeysTable = pgTable(
     index("api_keys_key_idx").on(table.key),
     index("api_keys_is_active_idx").on(table.is_active),
     unique("api_keys_name_per_user_idx").on(table.user_id, table.name),
+  ],
+);
+
+export const mcpRequestAuditLogsTable = pgTable(
+  "mcp_request_audit_logs",
+  {
+    uuid: uuid("uuid").primaryKey().defaultRandom(),
+    endpoint_name: text("endpoint_name").notNull(),
+    namespace_uuid: uuid("namespace_uuid").references(
+      () => namespacesTable.uuid,
+      {
+        onDelete: "set null",
+      },
+    ),
+    session_id: text("session_id").notNull(),
+    auth_method: text("auth_method").notNull(),
+    api_key_uuid: uuid("api_key_uuid").references(() => apiKeysTable.uuid, {
+      onDelete: "set null",
+    }),
+    api_key_user_id: text("api_key_user_id").references(() => usersTable.id, {
+      onDelete: "set null",
+    }),
+    oauth_user_id: text("oauth_user_id").references(() => usersTable.id, {
+      onDelete: "set null",
+    }),
+    tool_name: text("tool_name").notNull(),
+    status: mcpRequestAuditStatusEnum("status").notNull(),
+    duration_ms: integer("duration_ms").notNull(),
+    error_message: text("error_message"),
+    created_at: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index("mcp_request_audit_logs_created_at_idx").on(table.created_at),
+    index("mcp_request_audit_logs_endpoint_name_idx").on(table.endpoint_name),
+    index("mcp_request_audit_logs_namespace_uuid_idx").on(table.namespace_uuid),
+    index("mcp_request_audit_logs_session_id_idx").on(table.session_id),
+    index("mcp_request_audit_logs_api_key_uuid_idx").on(table.api_key_uuid),
+    index("mcp_request_audit_logs_api_key_user_id_idx").on(
+      table.api_key_user_id,
+    ),
+    index("mcp_request_audit_logs_oauth_user_id_idx").on(table.oauth_user_id),
+    index("mcp_request_audit_logs_tool_name_idx").on(table.tool_name),
+    index("mcp_request_audit_logs_status_idx").on(table.status),
   ],
 );
 

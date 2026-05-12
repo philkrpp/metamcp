@@ -4,6 +4,7 @@ import logger from "@/utils/logger";
 
 import { configService } from "../config.service";
 import { mcpServerPool } from "./mcp-server-pool";
+import { MetaMCPHandlerContext } from "./metamcp-middleware/functional-middleware";
 import { createServer } from "./metamcp-proxy";
 
 export interface MetaMcpServerInstance {
@@ -65,10 +66,36 @@ export class MetaMcpServerPool {
     sessionId: string,
     namespaceUuid: string,
     includeInactiveServers: boolean = false,
+    requestContext?: Pick<MetaMCPHandlerContext, "endpointName" | "auth">,
   ): Promise<MetaMcpServerInstance | undefined> {
     // Check if we already have an active server for this sessionId
     if (this.activeServers[sessionId]) {
       return this.activeServers[sessionId];
+    }
+
+    // Idle servers are built without request auth context. Requests that need
+    // per-request auditing must use a fresh server so handler context is scoped
+    // to the current endpoint session.
+    if (requestContext) {
+      const newServer = await this.createNewServer(
+        sessionId,
+        namespaceUuid,
+        includeInactiveServers,
+        requestContext,
+      );
+      if (!newServer) {
+        return undefined;
+      }
+
+      this.activeServers[sessionId] = newServer;
+      this.sessionToNamespace[sessionId] = namespaceUuid;
+      this.sessionTimestamps[sessionId] = Date.now();
+
+      logger.info(
+        `Created new audited MetaMCP server for namespace ${namespaceUuid}, session ${sessionId}`,
+      );
+
+      return newServer;
     }
 
     // Check if we have an idle server for this namespace that we can convert
@@ -95,6 +122,7 @@ export class MetaMcpServerPool {
       sessionId,
       namespaceUuid,
       includeInactiveServers,
+      requestContext,
     );
     if (!newServer) {
       return undefined;
@@ -121,6 +149,7 @@ export class MetaMcpServerPool {
     sessionId: string,
     namespaceUuid: string,
     includeInactiveServers: boolean = false,
+    requestContext?: Pick<MetaMCPHandlerContext, "endpointName" | "auth">,
   ): Promise<MetaMcpServerInstance | undefined> {
     try {
       // Create the MetaMCP server - MCP server pool is pre-warmed during startup
@@ -128,6 +157,7 @@ export class MetaMcpServerPool {
         namespaceUuid,
         sessionId,
         includeInactiveServers,
+        requestContext,
       );
 
       return serverInstance;

@@ -12,6 +12,7 @@ import { configService } from "../../../lib/config.service";
 import { ConnectedClient } from "../../../lib/metamcp";
 import { getMcpServers } from "../../../lib/metamcp/fetch-metamcp";
 import { mcpServerPool } from "../../../lib/metamcp/mcp-server-pool";
+import { createAuditCallToolMiddleware } from "../../../lib/metamcp/metamcp-middleware/audit-requests.functional";
 import {
   createFilterCallToolMiddleware,
   createFilterListToolsMiddleware,
@@ -194,11 +195,14 @@ export const createOriginalCallToolHandler = (): CallToolHandler => {
 export const createMiddlewareEnabledHandlers = (
   sessionId: string,
   namespaceUuid: string,
+  requestContext?: Pick<MetaMCPHandlerContext, "endpointName" | "auth">,
 ) => {
   // Create the handler context
   const handlerContext: MetaMCPHandlerContext = {
     namespaceUuid,
     sessionId,
+    endpointName: requestContext?.endpointName || "unknown",
+    auth: requestContext?.auth,
   };
 
   // Create original handlers
@@ -221,8 +225,8 @@ export const createMiddlewareEnabledHandlers = (
         `Access denied to tool "${toolName}": ${reason}`,
     }),
     createToolOverridesCallToolMiddleware({ cacheEnabled: true }),
+    createAuditCallToolMiddleware(),
     // Add more middleware here as needed
-    // createAuditingMiddleware(),
     // createAuthorizationMiddleware(),
   )(originalCallToolHandler);
 
