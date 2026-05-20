@@ -160,6 +160,13 @@ export const oauthImplementations = {
         }),
         ...(input.tokens && { tokens: input.tokens }),
         ...(input.code_verifier && { code_verifier: input.code_verifier }),
+        // CSRF-defence nonce (#299). MUST be forwarded — omitting it here
+        // silently disables state validation at `exchangeToken` because the
+        // DB column stays NULL and the validator takes the back-compat
+        // bypass. Pinned by the "forwards expected_state to the repo" test.
+        ...(input.expected_state && {
+          expected_state: input.expected_state,
+        }),
       });
 
       if (!session) {

@@ -796,4 +796,35 @@ describe("exchangeToken state CSRF validation", () => {
     expect(clearExpectedState).not.toHaveBeenCalled();
     fetchSpy.mockRestore();
   });
+
+  // Regression test for the persistence bug found in code review: the
+  // tRPC `upsert` handler previously stripped `expected_state` before
+  // calling the repo, leaving the DB column NULL and silently disabling
+  // the CSRF check at `exchangeToken` (which then falls through the
+  // back-compat NULL branch). Pins the forward-through behaviour so a
+  // future refactor of the spread cannot regress it.
+  it("frontend.oauth.upsert forwards expected_state to the repository", async () => {
+    const { oauthImplementations, upsert } = await loadModule();
+    upsert.mockResolvedValue({
+      uuid: "sess",
+      mcp_server_uuid: SERVER_UUID,
+      client_information: null,
+      tokens: null,
+      code_verifier: null,
+      created_at: new Date(),
+      updated_at: new Date(),
+    });
+
+    await oauthImplementations.upsert({
+      mcp_server_uuid: SERVER_UUID,
+      expected_state: "the-csrf-nonce",
+    });
+
+    expect(upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mcp_server_uuid: SERVER_UUID,
+        expected_state: "the-csrf-nonce",
+      }),
+    );
+  });
 });
