@@ -176,10 +176,7 @@ async function doRefresh(
 
   await oauthSessionsRepository.upsert({
     mcp_server_uuid: serverParams.uuid,
-    // jsonb column tolerates the wider RFC 6749 token shape; cast through
-    // unknown to satisfy the narrow MCP SDK type on the repo layer.
-    tokens:
-      newTokens as unknown as import("@modelcontextprotocol/sdk/shared/auth.js").OAuthTokens,
+    tokens: newTokens,
   });
 
   logger.info(

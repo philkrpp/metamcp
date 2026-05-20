@@ -25,6 +25,26 @@ export const OAuthTokensSchema = z.object({
   refresh_token: z.string().optional(),
 });
 
+// Upstream token-response schema (RFC 6749 §5.1 plus common provider
+// extensions). Used as the persisted shape in `oauth_sessions.tokens`
+// because real-world responses include extra fields the MCP SDK's narrow
+// schema would strip (Salesforce `instance_url`, OpenID Connect
+// `id_token`, Microsoft `ext_expires_in`, ...). The repository's `tokens`
+// parameter is typed against this so the bridge-cast sites can drop their
+// `as unknown as OAuthTokens` casts.
+export const UpstreamTokenResponseSchema = z
+  .object({
+    access_token: z.string(),
+    token_type: z.string(),
+    expires_in: z.number().optional(),
+    refresh_token: z.string().optional(),
+    scope: z.string().optional(),
+    id_token: z.string().optional(),
+  })
+  .passthrough();
+
+export type UpstreamTokenResponse = z.infer<typeof UpstreamTokenResponseSchema>;
+
 // OAuth Client schema for registered clients
 export const OAuthClientSchema = z.object({
   client_id: z.string(),
@@ -220,18 +240,25 @@ export const RefreshOAuthTokenResponseSchema = z.union([
   }),
 ]);
 
-// Repository-specific schemas
+// Repository-specific schemas.
+//
+// `tokens` is typed against UpstreamTokenResponseSchema (RFC 6749 +
+// .passthrough()) rather than the MCP SDK's narrow OAuthTokensSchema. The
+// `oauth_sessions.tokens` jsonb column persists whatever the upstream
+// returns (Salesforce `instance_url`, OIDC `id_token`, Microsoft
+// `ext_expires_in`, ...); the wider type lets the backend write the
+// response without `as unknown as OAuthTokens` casts.
 export const OAuthSessionCreateInputSchema = z.object({
   mcp_server_uuid: z.string(),
   client_information: OAuthClientInformationSchema.optional(),
-  tokens: OAuthTokensSchema.nullable().optional(),
+  tokens: UpstreamTokenResponseSchema.nullable().optional(),
   code_verifier: z.string().nullable().optional(),
 });
 
 export const OAuthSessionUpdateInputSchema = z.object({
   mcp_server_uuid: z.string(),
   client_information: OAuthClientInformationSchema.optional(),
-  tokens: OAuthTokensSchema.nullable().optional(),
+  tokens: UpstreamTokenResponseSchema.nullable().optional(),
   code_verifier: z.string().nullable().optional(),
 });
 
@@ -248,7 +275,7 @@ export const DatabaseOAuthSessionSchema = z.object({
   uuid: z.string(),
   mcp_server_uuid: z.string(),
   client_information: OAuthClientInformationSchema.nullable(),
-  tokens: OAuthTokensSchema.nullable(),
+  tokens: UpstreamTokenResponseSchema.nullable(),
   code_verifier: z.string().nullable(),
   created_at: z.date(),
   updated_at: z.date(),

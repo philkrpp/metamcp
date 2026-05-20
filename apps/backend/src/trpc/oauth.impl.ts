@@ -297,8 +297,7 @@ export const oauthImplementations = {
 
     await oauthSessionsRepository.upsert({
       mcp_server_uuid: input.mcp_server_uuid,
-      tokens:
-        tokens as unknown as import("@modelcontextprotocol/sdk/shared/auth.js").OAuthTokens,
+      tokens,
     });
 
     logger.info(
