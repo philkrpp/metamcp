@@ -12,6 +12,7 @@ import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 
+import { AdvancedOAuthSection } from "@/components/advanced-oauth-section";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -159,18 +160,41 @@ export function EditMcpServer({
       headers: "",
       env: "",
       user_id: undefined,
+      oauth_client_id: "",
+      oauth_client_secret: "",
+      oauth_authorization_endpoint: "",
+      oauth_token_endpoint: "",
+      oauth_scope: "",
+      oauth_token_endpoint_auth_method: "none",
     },
   });
+
+  // Pull existing pre-registered OAuth client info so the edit form prefills
+  // (and the section opens by default when any value is set).
+  const existingOauthQuery = trpc.frontend.oauth.get.useQuery(
+    { mcp_server_uuid: server?.uuid ?? "" },
+    {
+      enabled: Boolean(server?.uuid && isOpen),
+      retry: false,
+    },
+  );
 
   // Watch for type changes in edit form and clear irrelevant fields
   useEffect(() => {
     const subscription = editForm.watch((value, { name }) => {
       if (name === "type" && value.type) {
         if (value.type === McpServerTypeEnum.Enum.STDIO) {
-          // Clear URL, bearer token, and headers when switching to stdio
+          // Clear URL, bearer token, headers, and pre-registered OAuth fields
+          // when switching to stdio
           editForm.setValue("url", "");
           editForm.setValue("bearerToken", "");
           editForm.setValue("headers", "");
+          editForm.setValue("oauth_client_id", "");
+          editForm.setValue("oauth_client_secret", "");
+          editForm.setValue("oauth_authorization_endpoint", "");
+          editForm.setValue("oauth_token_endpoint", "");
+          editForm.setValue("oauth_scope", "");
+          editForm.setValue("oauth_token_endpoint_auth_method", "none");
         } else if (
           value.type === McpServerTypeEnum.Enum.SSE ||
           value.type === McpServerTypeEnum.Enum.STREAMABLE_HTTP
@@ -185,9 +209,24 @@ export function EditMcpServer({
     return () => subscription.unsubscribe();
   }, [editForm]);
 
-  // Pre-populate form when server changes
+  // Pre-populate form when server changes (and re-pull existing OAuth client
+  // information from the matching oauth_sessions row, if any).
   useEffect(() => {
     if (server && isOpen) {
+      const existingClient =
+        existingOauthQuery.data && existingOauthQuery.data.success
+          ? (existingOauthQuery.data.data.client_information as
+              | (Record<string, unknown> & {
+                  client_id?: string;
+                  client_secret?: string;
+                  scope?: string;
+                  authorization_endpoint?: string;
+                  token_endpoint?: string;
+                  token_endpoint_auth_method?: string;
+                })
+              | null)
+          : null;
+
       editForm.reset({
         name: server.name,
         description: server.description || "",
@@ -203,9 +242,21 @@ export function EditMcpServer({
           .map(([key, value]) => `${key}=${value}`)
           .join("\n"),
         user_id: server.user_id,
+        oauth_client_id: existingClient?.client_id ?? "",
+        oauth_client_secret: existingClient?.client_secret ?? "",
+        oauth_authorization_endpoint:
+          existingClient?.authorization_endpoint ?? "",
+        oauth_token_endpoint: existingClient?.token_endpoint ?? "",
+        oauth_scope: existingClient?.scope ?? "",
+        oauth_token_endpoint_auth_method:
+          (existingClient?.token_endpoint_auth_method as
+            | "none"
+            | "client_secret_basic"
+            | "client_secret_post"
+            | undefined) ?? "none",
       });
     }
-  }, [server, isOpen, editForm]);
+  }, [server, isOpen, editForm, existingOauthQuery.data]);
 
   // Handle edit server
   const handleEditServer = async (data: EditServerFormData) => {
@@ -253,6 +304,37 @@ export function EditMcpServer({
         }
       }
 
+      // Only attach the pre-registered OAuth payload when the user actually
+      // touched the Advanced OAuth section. Otherwise an unrelated edit
+      // (e.g. fixing a typo in the description) would re-derive
+      // `oauth_sessions.client_information` and potentially clobber an
+      // SDK-populated row from a prior dynamic-registration flow.
+      const isHttpServer =
+        data.type === McpServerTypeEnum.Enum.SSE ||
+        data.type === McpServerTypeEnum.Enum.STREAMABLE_HTTP;
+      const dirty = editForm.formState.dirtyFields as Record<string, unknown>;
+      const oauthSectionTouched = Boolean(
+        dirty.oauth_client_id ||
+          dirty.oauth_client_secret ||
+          dirty.oauth_authorization_endpoint ||
+          dirty.oauth_token_endpoint ||
+          dirty.oauth_scope ||
+          dirty.oauth_token_endpoint_auth_method,
+      );
+      const oauthClientInfo =
+        isHttpServer && oauthSectionTouched
+          ? {
+              client_id: data.oauth_client_id?.trim() || undefined,
+              client_secret: data.oauth_client_secret || undefined,
+              authorization_endpoint:
+                data.oauth_authorization_endpoint || undefined,
+              token_endpoint: data.oauth_token_endpoint || undefined,
+              scope: data.oauth_scope || undefined,
+              token_endpoint_auth_method:
+                data.oauth_token_endpoint_auth_method || "none",
+            }
+          : undefined;
+
       // Create the API request payload
       const apiPayload: UpdateMcpServerRequest = {
         uuid: server.uuid,
@@ -266,6 +348,7 @@ export function EditMcpServer({
         bearerToken: data.bearerToken,
         headers: headersObject,
         user_id: data.user_id,
+        oauth_client_info: oauthClientInfo,
       };
 
       // Use tRPC mutation instead of direct fetch
@@ -509,6 +592,23 @@ export function EditMcpServer({
                   One header per line in KEY=VALUE format
                 </p>
               </div>
+
+              <AdvancedOAuthSection
+                form={
+                  editForm as unknown as Parameters<
+                    typeof AdvancedOAuthSection
+                  >[0]["form"]
+                }
+                idPrefix="edit"
+                defaultOpen={Boolean(
+                  existingOauthQuery.data?.success &&
+                    (
+                      existingOauthQuery.data.data.client_information as {
+                        client_id?: string;
+                      } | null
+                    )?.client_id,
+                )}
+              />
             </>
           )}
 

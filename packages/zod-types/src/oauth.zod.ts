@@ -1,12 +1,20 @@
 import { z } from "zod";
 
-// OAuth Client Information schema (matching MCP SDK)
-export const OAuthClientInformationSchema = z.object({
-  client_id: z.string(),
-  client_secret: z.string().optional(),
-  client_id_issued_at: z.number().optional(),
-  client_secret_expires_at: z.number().optional(),
-});
+// OAuth Client Information schema (a superset of the MCP SDK's
+// OAuthClientInformationSchema). Uses `.passthrough()` so we round-trip the
+// extra RFC 7591 metadata fields the pre-registered-client UI captures
+// (redirect_uris, grant_types, response_types, scope,
+// token_endpoint_auth_method, authorization_endpoint, token_endpoint).
+// Without passthrough zod would silently strip those on read, causing the
+// edit form to prefill blanks and overwrite the row on the next save.
+export const OAuthClientInformationSchema = z
+  .object({
+    client_id: z.string(),
+    client_secret: z.string().optional(),
+    client_id_issued_at: z.number().optional(),
+    client_secret_expires_at: z.number().optional(),
+  })
+  .passthrough();
 
 // OAuth Tokens schema (matching MCP SDK)
 export const OAuthTokensSchema = z.object({
@@ -146,6 +154,69 @@ export const UpsertOAuthSessionResponseSchema = z.union([
   z.object({
     success: z.literal(false),
     error: z.string(),
+  }),
+]);
+
+// Server-side token-exchange request: the frontend forwards the
+// authorization code (received from the upstream's redirect) to MetaMCP's
+// backend, which performs the POST to the upstream token endpoint. This
+// replaces the browser-side `fetch(token_endpoint)` path that CORS-fails
+// against most enterprise providers (Salesforce, Okta, Auth0, ...).
+//
+// Note: the upstream server URL is NOT accepted from the caller. The
+// backend resolves it from the `mcp_servers` row keyed by mcp_server_uuid
+// to prevent an authenticated user from steering discovery + token POST
+// at an attacker-controlled host (SSRF / authorization-code exfiltration).
+export const ExchangeOAuthTokenRequestSchema = z.object({
+  mcp_server_uuid: z.string().uuid(),
+  // Authorization code returned in the redirect query string.
+  code: z.string().min(1, "code is required"),
+  // Optional `state` parameter for CSRF defense. Echoed back from the
+  // upstream redirect. Validated against an expected value when MetaMCP
+  // gains per-flow state tracking (separate work).
+  state: z.string().optional(),
+});
+
+// Upstream OAuth error envelope (RFC 6749 §5.2). Surfaced to the frontend
+// so the callback page can render a real error instead of "Failed to fetch".
+export const UpstreamOAuthErrorSchema = z.object({
+  error: z.string(),
+  error_description: z.string().optional(),
+  error_uri: z.string().optional(),
+});
+
+export const ExchangeOAuthTokenResponseSchema = z.union([
+  z.object({
+    success: z.literal(true),
+    message: z.string(),
+  }),
+  z.object({
+    success: z.literal(false),
+    error: z.string(),
+    error_description: z.string().optional(),
+    // HTTP status code from the upstream, or 0 if MetaMCP could not reach it.
+    upstream_status: z.number().optional(),
+  }),
+]);
+
+// Server-side refresh-token grant. Same CORS rationale: the upstream's
+// token endpoint typically rejects browser-origin requests. As with
+// `ExchangeOAuthTokenRequestSchema`, the upstream URL is NOT accepted
+// from the caller — it is resolved server-side from the mcp_servers row.
+export const RefreshOAuthTokenRequestSchema = z.object({
+  mcp_server_uuid: z.string().uuid(),
+});
+
+export const RefreshOAuthTokenResponseSchema = z.union([
+  z.object({
+    success: z.literal(true),
+    message: z.string(),
+  }),
+  z.object({
+    success: z.literal(false),
+    error: z.string(),
+    error_description: z.string().optional(),
+    upstream_status: z.number().optional(),
   }),
 ]);
 
