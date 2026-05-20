@@ -12,6 +12,30 @@ type CallbackStatus =
   | { kind: "pending" }
   | { kind: "error"; error: string; description?: string };
 
+// Drop every sessionStorage entry the SDK used during the pre-redirect half
+// of the flow. Called from both the success and the error paths so a
+// failed exchange leaves no stale state to confuse a retry — the next
+// authorize click starts fresh.
+//
+// `serverUrl` is only known after we read sessionStorage; when it's null
+// (e.g. the upstream-error or missing-parameters early returns) we can
+// still clear the unscoped keys.
+function clearOAuthSessionKeys(serverUrl: string | null): void {
+  if (serverUrl) {
+    sessionStorage.removeItem(
+      getServerSpecificKey(SESSION_KEYS.CLIENT_INFORMATION, serverUrl),
+    );
+    sessionStorage.removeItem(
+      getServerSpecificKey(SESSION_KEYS.TOKENS, serverUrl),
+    );
+    sessionStorage.removeItem(
+      getServerSpecificKey(SESSION_KEYS.CODE_VERIFIER, serverUrl),
+    );
+  }
+  sessionStorage.removeItem(SESSION_KEYS.SERVER_URL);
+  sessionStorage.removeItem(SESSION_KEYS.MCP_SERVER_UUID);
+}
+
 const OAuthCallback = () => {
   const { t } = useTranslations();
   const hasProcessedRef = useRef(false);
@@ -39,6 +63,7 @@ const OAuthCallback = () => {
       // Upstream sent back an OAuth error response (user denied, invalid
       // scope, ...). Surface it instead of pretending the flow succeeded.
       if (upstreamError) {
+        clearOAuthSessionKeys(serverUrl);
         setStatus({
           kind: "error",
           error: upstreamError,
@@ -48,6 +73,7 @@ const OAuthCallback = () => {
       }
 
       if (!code || !serverUrl || !mcpServerUuid) {
+        clearOAuthSessionKeys(serverUrl);
         setStatus({
           kind: "error",
           error: "missing_callback_parameters",
@@ -77,6 +103,7 @@ const OAuthCallback = () => {
           });
 
         if (!result.success) {
+          clearOAuthSessionKeys(serverUrl);
           setStatus({
             kind: "error",
             error: result.error,
@@ -86,27 +113,13 @@ const OAuthCallback = () => {
         }
 
         // Backend persisted tokens directly into oauth_sessions; we no
-        // longer need to mirror anything from sessionStorage. Clean up the
-        // browser-side scratch space the SDK used during the pre-redirect
-        // half of the flow.
-        const clientInformationKey = getServerSpecificKey(
-          SESSION_KEYS.CLIENT_INFORMATION,
-          serverUrl,
-        );
-        const tokensKey = getServerSpecificKey(SESSION_KEYS.TOKENS, serverUrl);
-        const codeVerifierKey = getServerSpecificKey(
-          SESSION_KEYS.CODE_VERIFIER,
-          serverUrl,
-        );
-        sessionStorage.removeItem(clientInformationKey);
-        sessionStorage.removeItem(tokensKey);
-        sessionStorage.removeItem(codeVerifierKey);
-        sessionStorage.removeItem(SESSION_KEYS.SERVER_URL);
-        sessionStorage.removeItem(SESSION_KEYS.MCP_SERVER_UUID);
+        // longer need to mirror anything from sessionStorage.
+        clearOAuthSessionKeys(serverUrl);
 
         window.location.href = `/mcp-servers/${mcpServerUuid}`;
       } catch (error) {
         console.error("OAuth callback error:", error);
+        clearOAuthSessionKeys(serverUrl);
         setStatus({
           kind: "error",
           error: "callback_failed",
