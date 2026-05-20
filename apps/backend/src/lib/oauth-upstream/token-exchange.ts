@@ -316,24 +316,56 @@ export function resolveTokenEndpoint(args: {
 //   2. Server's declared supported methods (prefer `none` for PKCE, then
 //      `client_secret_basic`, then `client_secret_post`)
 //   3. `client_secret_basic` if a secret is present, else `none`
+// OAuth error envelope codes that indicate an expired/invalid access
+// token rather than a permanent permission denial. When the upstream
+// returns HTTP 403 with one of these in the body, the access token is
+// the problem (so refresh is worth trying), not the user's permissions.
+const INVALID_TOKEN_OAUTH_ERROR_CODES = [
+  "invalid_token",
+  "expired_token",
+  "insufficient_scope",
+  "invalid_grant",
+] as const;
+
 // Best-effort: classify an error from `client.connect(transport)` as a
-// 401-from-the-upstream-MCP-server case worth attempting a token refresh
-// for. We deliberately keep this broad — the alternative (false negatives)
-// is the bug we're trying to avoid. False positives just cost one extra
-// refresh attempt.
+// case worth attempting a token refresh for.
+//
+// 401 / `UnauthorizedError` are always classified as auth errors.
+//
+// 403 is classified as an auth error ONLY when the response body matches
+// an OAuth error envelope with one of the codes above, or when the SDK's
+// error message surfaces a `WWW-Authenticate: Bearer` hint. A bare 403
+// is treated as a legitimate permission denial — refreshing the token
+// won't make it go away, and burning a rotating refresh_token on it
+// would be worse than no-op.
 export function isUpstreamUnauthorizedError(error: unknown): boolean {
   if (!error) return false;
   if (
-    error &&
     typeof error === "object" &&
     "name" in error &&
     (error as { name?: string }).name === "UnauthorizedError"
   ) {
     return true;
   }
-  if (error instanceof Error) {
-    return /\b401\b|unauthorized/i.test(error.message);
+  if (!(error instanceof Error)) return false;
+
+  const message = error.message;
+
+  if (/\b401\b|unauthorized/i.test(message)) return true;
+
+  if (/\b403\b/.test(message)) {
+    const codes = INVALID_TOKEN_OAUTH_ERROR_CODES.join("|");
+    const oauthEnvelope = new RegExp(`"error"\\s*:\\s*"(?:${codes})"`);
+    if (oauthEnvelope.test(message)) return true;
+    // The SDK error message may serialize the response headers in any
+    // shape (raw `WWW-Authenticate: Bearer ...`, JSON-encoded headers
+    // object, etc.). Co-occurrence of both tokens is a sufficiently
+    // narrow heuristic for "this 403 came back with a Bearer challenge".
+    if (/WWW-Authenticate/i.test(message) && /\bBearer\b/.test(message)) {
+      return true;
+    }
   }
+
   return false;
 }
 

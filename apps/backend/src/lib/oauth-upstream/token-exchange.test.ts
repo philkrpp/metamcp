@@ -421,4 +421,66 @@ describe("isUpstreamUnauthorizedError", () => {
       isUpstreamUnauthorizedError(new Error("authorize endpoint missing")),
     ).toBe(false);
   });
+
+  // Salesforce, Okta, and some Microsoft endpoints return HTTP 403 (not
+  // 401) when an access token has expired. The SDK's transport surfaces
+  // the response body in the error message, so we can pattern-match the
+  // OAuth error envelope. Bare 403s (plain permission denial) must NOT
+  // be classified as auth errors — refreshing won't help, and burning a
+  // rotating refresh token on it would be a net loss.
+  it("classifies HTTP 403 + invalid_token OAuth envelope as auth error", () => {
+    expect(
+      isUpstreamUnauthorizedError(
+        new Error(
+          'Error POSTing to endpoint (HTTP 403): {"error":"invalid_token","error_description":"Access token is expired"}',
+        ),
+      ),
+    ).toBe(true);
+  });
+
+  it("classifies HTTP 403 + expired_token OAuth envelope as auth error", () => {
+    expect(
+      isUpstreamUnauthorizedError(
+        new Error(
+          'Streamable HTTP error: (HTTP 403): {"error": "expired_token"}',
+        ),
+      ),
+    ).toBe(true);
+  });
+
+  it("classifies HTTP 403 + insufficient_scope as auth error", () => {
+    expect(
+      isUpstreamUnauthorizedError(
+        new Error(
+          'Streamable HTTP error: (HTTP 403): {"error":"insufficient_scope"}',
+        ),
+      ),
+    ).toBe(true);
+  });
+
+  it("classifies HTTP 403 + WWW-Authenticate: Bearer hint as auth error", () => {
+    expect(
+      isUpstreamUnauthorizedError(
+        new Error(
+          'HTTP 403; headers: { "WWW-Authenticate": "Bearer realm=\\"example\\"" }',
+        ),
+      ),
+    ).toBe(true);
+  });
+
+  it("does NOT classify a bare HTTP 403 as auth error (legitimate permission denial)", () => {
+    expect(
+      isUpstreamUnauthorizedError(
+        new Error("Error POSTing to endpoint (HTTP 403): Forbidden"),
+      ),
+    ).toBe(false);
+  });
+
+  it("does NOT classify HTTP 403 + non-token OAuth error (e.g. invalid_client) as auth error", () => {
+    expect(
+      isUpstreamUnauthorizedError(
+        new Error('(HTTP 403): {"error":"invalid_client"}'),
+      ),
+    ).toBe(false);
+  });
 });
