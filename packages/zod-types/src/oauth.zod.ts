@@ -128,12 +128,16 @@ export const GetOAuthSessionResponseSchema = z.union([
   }),
 ]);
 
-// Upsert OAuth Session Request - all fields optional for updates
+// Upsert OAuth Session Request - all fields optional for updates.
+// `tokens` and `code_verifier` are NOT nullable: the atomic upsert in
+// `OAuthSessionsRepository.upsert` drops nullish values via the conditional
+// spread (omit = "do not touch"), so allowing `null` here would advertise a
+// "clear this column" contract the implementation does not honour.
 export const UpsertOAuthSessionRequestSchema = z.object({
   mcp_server_uuid: z.string().uuid(),
   client_information: OAuthClientInformationSchema.optional(),
-  tokens: OAuthTokensSchema.nullable().optional(),
-  code_verifier: z.string().nullable().optional(),
+  tokens: OAuthTokensSchema.optional(),
+  code_verifier: z.string().optional(),
 });
 
 // Upsert OAuth Session Response
@@ -149,19 +153,21 @@ export const UpsertOAuthSessionResponseSchema = z.union([
   }),
 ]);
 
-// Repository-specific schemas
+// Repository-specific schemas. `tokens` and `code_verifier` mirror the upsert
+// contract above: omitted means "leave the column alone"; `null` is not
+// accepted because the impl would silently drop it.
 export const OAuthSessionCreateInputSchema = z.object({
   mcp_server_uuid: z.string(),
   client_information: OAuthClientInformationSchema.optional(),
-  tokens: OAuthTokensSchema.nullable().optional(),
-  code_verifier: z.string().nullable().optional(),
+  tokens: OAuthTokensSchema.optional(),
+  code_verifier: z.string().optional(),
 });
 
 export const OAuthSessionUpdateInputSchema = z.object({
   mcp_server_uuid: z.string(),
   client_information: OAuthClientInformationSchema.optional(),
-  tokens: OAuthTokensSchema.nullable().optional(),
-  code_verifier: z.string().nullable().optional(),
+  tokens: OAuthTokensSchema.optional(),
+  code_verifier: z.string().optional(),
 });
 
 // Export repository types
