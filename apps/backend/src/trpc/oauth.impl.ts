@@ -227,6 +227,39 @@ export const oauthImplementations = {
           "OAuth session has no code_verifier. The authorize flow must be re-initiated.",
       };
     }
+
+    // RFC 6749 §10.12 CSRF defence. `expected_state` was persisted at the
+    // authorize-redirect step by `DbOAuthClientProvider.state()`. Three
+    // cases:
+    //
+    //   - expected_state IS NULL → flow started before this column existed,
+    //     OR a previous exchange already cleared it (replay). Accept for
+    //     backward compat with in-flight pre-fix flows; the column will be
+    //     populated on the NEXT authorize attempt and validated then.
+    //   - expected_state non-null AND matches input.state → proceed; clear
+    //     the column AFTER successful upstream exchange so the row can't
+    //     be replayed.
+    //   - expected_state non-null AND input.state missing OR mismatched →
+    //     fail-closed. Includes the missing case explicitly: an attacker
+    //     who omits state must not bypass the check by triggering a
+    //     truthy-undefined comparison.
+    //
+    // Validation runs BEFORE the upstream POST so a mismatch leaks no
+    // authorization code to a third party.
+    if (session.expected_state) {
+      if (!input.state || input.state !== session.expected_state) {
+        logger.warn(
+          `[oauth] state mismatch — server=${input.mcp_server_uuid} ` +
+            `expected_present=true got_present=${Boolean(input.state)}`,
+        );
+        return {
+          success: false as const,
+          error: "invalid_state",
+          error_description:
+            "OAuth state mismatch — possible CSRF. The authorize flow must be re-initiated.",
+        };
+      }
+    }
     const clientInformation = clientInfoAsRecord(session.client_information);
     const clientId =
       clientInformation && typeof clientInformation.client_id === "string"
@@ -299,6 +332,29 @@ export const oauthImplementations = {
       mcp_server_uuid: input.mcp_server_uuid,
       tokens,
     });
+
+    // One-shot clear: with the upstream exchange successful, the
+    // `expected_state` nonce has served its purpose. Clearing it now
+    // ensures a replay of the same `code`+`state` pair would fall through
+    // the back-compat NULL branch on a second exchange attempt — but since
+    // the `code` itself is already burned by the upstream, the replay
+    // would fail with `invalid_grant` anyway. Belt-and-braces.
+    //
+    // Only runs on SUCCESS — an upstream error returns above without
+    // clearing, so the user can retry the exchange without re-running the
+    // authorize flow.
+    try {
+      await oauthSessionsRepository.clearExpectedState(input.mcp_server_uuid);
+    } catch (clearError) {
+      // Logging only — the exchange itself already succeeded and a stale
+      // expected_state will be overwritten on the next authorize attempt.
+      logger.warn(
+        `[oauth] failed to clear expected_state after successful exchange ` +
+          `— server=${input.mcp_server_uuid}: ${
+            clearError instanceof Error ? clearError.message : "unknown"
+          }`,
+      );
+    }
 
     logger.info(
       `[oauth] token exchange succeeded — server=${input.mcp_server_uuid} ` +
