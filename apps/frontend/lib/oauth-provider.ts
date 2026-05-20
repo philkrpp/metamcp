@@ -20,8 +20,19 @@ class DbOAuthClientProvider implements OAuthClientProvider {
   constructor(mcpServerUuid: string, serverUrl: string) {
     this.mcpServerUuid = mcpServerUuid;
     this.serverUrl = serverUrl;
-    // Save the server URL to session storage for consistency
-    sessionStorage.setItem(SESSION_KEYS.SERVER_URL, serverUrl);
+    // No sessionStorage access here: the constructor runs during Next.js SSR
+    // for the MCP server detail page, where sessionStorage is undefined.
+    // The SERVER_URL seed is deferred to ensureServerUrlStored(), called by
+    // the OAuth-flow methods below, all of which are invoked client-side.
+  }
+
+  // Seeds SESSION_KEYS.SERVER_URL on first invocation in the browser. The
+  // OAuth callback page reads this key to recover the upstream serverUrl, so
+  // it must be set before redirectToAuthorization sends the user away. Safe
+  // to call repeatedly; a no-op on the server.
+  private ensureServerUrlStored() {
+    if (typeof window === "undefined") return;
+    sessionStorage.setItem(SESSION_KEYS.SERVER_URL, this.serverUrl);
   }
 
   get redirectUrl() {
@@ -91,6 +102,7 @@ class DbOAuthClientProvider implements OAuthClientProvider {
   }
 
   async saveClientInformation(clientInformation: OAuthClientInformation) {
+    this.ensureServerUrlStored();
     // Save to session storage during OAuth flow
     const key = getServerSpecificKey(
       SESSION_KEYS.CLIENT_INFORMATION,
@@ -159,10 +171,12 @@ class DbOAuthClientProvider implements OAuthClientProvider {
   }
 
   redirectToAuthorization(authorizationUrl: URL) {
+    this.ensureServerUrlStored();
     window.location.href = authorizationUrl.href;
   }
 
   async saveCodeVerifier(codeVerifier: string) {
+    this.ensureServerUrlStored();
     // Save to session storage during OAuth flow
     const key = getServerSpecificKey(
       SESSION_KEYS.CODE_VERIFIER,
