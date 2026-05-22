@@ -61,7 +61,9 @@ export class McpServerPool {
    */
   static getInstance(defaultIdleCount: number = 1): McpServerPool {
     if (!McpServerPool.instance) {
-      McpServerPool.instance = new McpServerPool(defaultIdleCount);
+      const envMax = parseInt(process.env.MAX_TOTAL_CONNECTIONS || "", 10);
+      const maxConn = Number.isFinite(envMax) && envMax > 0 ? envMax : 100;
+      McpServerPool.instance = new McpServerPool(defaultIdleCount, maxConn);
     }
     return McpServerPool.instance;
   }
