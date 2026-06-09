@@ -77,6 +77,9 @@ importers:
       zod:
         specifier: ^3.25.64
         version: 3.25.64
+      zod-to-json-schema:
+        specifier: ^3.25.0
+        version: 3.25.0(zod@3.25.64)
     devDependencies:
       '@repo/eslint-config':
         specifier: workspace:*
