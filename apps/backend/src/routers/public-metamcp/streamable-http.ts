@@ -11,6 +11,7 @@ import { lookupEndpoint } from "@/middleware/lookup-endpoint-middleware";
 import { rateLimitMiddleware } from "@/middleware/rate-limit.middleware";
 import logger from "@/utils/logger";
 
+import { buildAdminToolsOptions } from "../../lib/admin-mcp/build-admin-tools-options";
 import { metaMcpServerPool } from "../../lib/metamcp/metamcp-server-pool";
 import { SessionLifetimeManagerImpl } from "../../lib/session-lifetime-manager";
 
@@ -134,10 +135,17 @@ streamableHttpRouter.post(
           `Generated new session ID: ${newSessionId} for endpoint: ${endpointName}`,
         );
 
+        const adminTools = await buildAdminToolsOptions(
+          authReq.endpoint,
+          authReq,
+        );
+
         // Get or create MetaMCP server instance from the pool
         const mcpServerInstance = await metaMcpServerPool.getServer(
           newSessionId,
           namespaceUuid,
+          false,
+          adminTools,
         );
         if (!mcpServerInstance) {
           throw new Error("Failed to get MetaMCP server instance from pool");
