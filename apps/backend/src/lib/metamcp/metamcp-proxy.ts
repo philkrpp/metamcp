@@ -27,6 +27,7 @@ import { toolsImplementations } from "../../trpc/tools.impl";
 import { configService } from "../config.service";
 import { ConnectedClient } from "./client";
 import { getMcpServers } from "./fetch-metamcp";
+import { requestWithSessionRecovery } from "./list-handler-recovery";
 import { mcpServerPool } from "./mcp-server-pool";
 import {
   createFilterCallToolMiddleware,
@@ -157,6 +158,12 @@ export const createServer = async (
     );
     const allTools: Tool[] = [];
 
+    // Servers that should have contributed tools but failed even after the
+    // recovery retry (or had no session at all). Drives the degraded-response
+    // tripwire after the fan-out — a swallowed failure returns a "successful"
+    // 0-tool namespace and nobody notices until a manual restart.
+    const failedServers: string[] = [];
+
     // Track visited servers to detect circular references - reset on each call
     const visitedServers = new Set<string>();
 
@@ -186,6 +193,14 @@ export const createServer = async (
         );
         if (!session) {
           console.log(`[DEBUG-TOOLS] ❌ No session for: ${params.name}`);
+          // No pooled session and the pool couldn't create one — server is
+          // ERROR-gated, connection-capped, or unreachable. Error level: this
+          // server is silently missing from the namespace's tool surface
+          // until the pool recovers.
+          logger.error(
+            `tools/list: no session available for server ${params.name || mcpServerUuid} — excluded from namespace response (error state, connection cap, or backend unreachable)`,
+          );
+          failedServers.push(params.name || mcpServerUuid);
           return;
         }
 
@@ -217,32 +232,58 @@ export const createServer = async (
           params.name || session.client.getServerVersion()?.name || "";
 
         try {
-          // Paginated tool discovery - load all pages automatically
-          const allServerTools: Tool[] = [];
-          let cursor: string | undefined = undefined;
-          let hasMore = true;
           const toolFetchStart = performance.now();
 
-          while (hasMore) {
-            const result: z.infer<typeof ListToolsResultSchema> =
-              await session.client.request(
-                {
-                  method: "tools/list",
-                  params: {
-                    cursor: cursor,
-                    _meta: request.params?._meta,
-                  },
-                },
-                ListToolsResultSchema,
-              );
+          // Paginated tool discovery - load all pages automatically
+          const fetchAllToolPages = async (
+            active: ConnectedClient,
+          ): Promise<Tool[]> => {
+            const pages: Tool[] = [];
+            let cursor: string | undefined = undefined;
+            let hasMore = true;
 
-            if (result.tools && result.tools.length > 0) {
-              allServerTools.push(...result.tools);
+            while (hasMore) {
+              const result: z.infer<typeof ListToolsResultSchema> =
+                await active.client.request(
+                  {
+                    method: "tools/list",
+                    params: {
+                      cursor: cursor,
+                      _meta: request.params?._meta,
+                    },
+                  },
+                  ListToolsResultSchema,
+                );
+
+              if (result.tools && result.tools.length > 0) {
+                pages.push(...result.tools);
+              }
+
+              cursor = result.nextCursor;
+              hasMore = !!result.nextCursor;
             }
 
-            cursor = result.nextCursor;
-            hasMore = !!result.nextCursor;
-          }
+            return pages;
+          };
+
+          // Invalidate-and-retry-once on session-lost / transport-lost.
+          // Without it a dead pooled session is never evicted from here and
+          // the namespace serves 0 tools as "success" until a manual restart.
+          let activeSession = session;
+          const allServerTools = await requestWithSessionRecovery({
+            pool: mcpServerPool,
+            sessionId: context.sessionId,
+            serverUuid: mcpServerUuid,
+            params,
+            namespaceUuid,
+            operation: "tools/list",
+            serverName,
+            session,
+            attempt: fetchAllToolPages,
+            onFreshSession: (fresh) => {
+              activeSession = fresh;
+            },
+          });
 
           console.log(
             `[DEBUG-TOOLS] ⏱️  Fetched ${allServerTools.length} tools from ${serverName} in ${(performance.now() - toolFetchStart).toFixed(2)}ms`,
@@ -291,7 +332,7 @@ export const createServer = async (
           // Use original tools for client response (middleware will be applied later)
           const toolsWithSource = allServerTools.map((tool) => {
             const toolName = `${sanitizeName(serverName)}__${tool.name}`;
-            toolToClient[toolName] = session;
+            toolToClient[toolName] = activeSession;
             toolToServerUuid[toolName] = mcpServerUuid;
 
             return {
@@ -304,6 +345,7 @@ export const createServer = async (
           allTools.push(...toolsWithSource);
         } catch (error) {
           logger.error(`Error fetching tools from: ${serverName}`, error);
+          failedServers.push(serverName || mcpServerUuid);
         }
       }),
     );
@@ -312,6 +354,16 @@ export const createServer = async (
     console.log(
       `[DEBUG-TOOLS] ✅ tools/list completed in ${totalTime.toFixed(2)}ms, returning ${allTools.length} tools`,
     );
+
+    // Degraded-response tripwire: a server that should have contributed tools
+    // failed even after the recovery retry (or had no session). The response
+    // is still returned (partial truth beats a hard error for the surviving
+    // servers) but the failure must be loud enough for log-based monitoring.
+    if (failedServers.length > 0) {
+      logger.error(
+        `tools/list DEGRADED for namespace ${namespaceUuid}: ${failedServers.length}/${allServerEntries.length} backend server(s) failed (${failedServers.join(", ")}); returning ${allTools.length} tools`,
+      );
+    }
 
     return { tools: allTools };
   };
@@ -545,6 +597,7 @@ export const createServer = async (
       includeInactiveServers,
     );
     const allPrompts: z.infer<typeof ListPromptsResultSchema>["prompts"] = [];
+    const failedServers: string[] = [];
 
     // Track visited servers to detect circular references - reset on each call
     const visitedServers = new Set<string>();
@@ -582,7 +635,13 @@ export const createServer = async (
           params,
           namespaceUuid,
         );
-        if (!session) return;
+        if (!session) {
+          logger.error(
+            `prompts/list: no session available for server ${params.name || uuid} — excluded from namespace response (error state, connection cap, or backend unreachable)`,
+          );
+          failedServers.push(params.name || uuid);
+          return;
+        }
 
         // Now check for self-referencing using the actual MCP server name
         const serverVersion = session.client.getServerVersion();
@@ -603,21 +662,36 @@ export const createServer = async (
         const serverName =
           params.name || session.client.getServerVersion()?.name || "";
         try {
-          const result = await session.client.request(
-            {
-              method: "prompts/list",
-              params: {
-                cursor: request.params?.cursor,
-                _meta: request.params?._meta,
-              },
+          let activeSession = session;
+          const result = await requestWithSessionRecovery({
+            pool: mcpServerPool,
+            sessionId,
+            serverUuid: uuid,
+            params,
+            namespaceUuid,
+            operation: "prompts/list",
+            serverName,
+            session,
+            attempt: (active) =>
+              active.client.request(
+                {
+                  method: "prompts/list",
+                  params: {
+                    cursor: request.params?.cursor,
+                    _meta: request.params?._meta,
+                  },
+                },
+                ListPromptsResultSchema,
+              ),
+            onFreshSession: (fresh) => {
+              activeSession = fresh;
             },
-            ListPromptsResultSchema,
-          );
+          });
 
           if (result.prompts) {
             const promptsWithSource = result.prompts.map((prompt) => {
               const promptName = `${sanitizeName(serverName)}__${prompt.name}`;
-              promptToClient[promptName] = session;
+              promptToClient[promptName] = activeSession;
               return {
                 ...prompt,
                 name: promptName,
@@ -628,9 +702,16 @@ export const createServer = async (
           }
         } catch (error) {
           logger.error(`Error fetching prompts from: ${serverName}`, error);
+          failedServers.push(serverName || uuid);
         }
       }),
     );
+
+    if (failedServers.length > 0) {
+      logger.error(
+        `prompts/list DEGRADED for namespace ${namespaceUuid}: ${failedServers.length} backend server(s) failed (${failedServers.join(", ")}); returning ${allPrompts.length} prompts`,
+      );
+    }
 
     return {
       prompts: allPrompts,
@@ -646,6 +727,7 @@ export const createServer = async (
     );
     const allResources: z.infer<typeof ListResourcesResultSchema>["resources"] =
       [];
+    const failedServers: string[] = [];
 
     // Track visited servers to detect circular references - reset on each call
     const visitedServers = new Set<string>();
@@ -683,7 +765,13 @@ export const createServer = async (
           params,
           namespaceUuid,
         );
-        if (!session) return;
+        if (!session) {
+          logger.error(
+            `resources/list: no session available for server ${params.name || uuid} — excluded from namespace response (error state, connection cap, or backend unreachable)`,
+          );
+          failedServers.push(params.name || uuid);
+          return;
+        }
 
         // Now check for self-referencing using the actual MCP server name
         const serverVersion = session.client.getServerVersion();
@@ -704,20 +792,35 @@ export const createServer = async (
         const serverName =
           params.name || session.client.getServerVersion()?.name || "";
         try {
-          const result = await session.client.request(
-            {
-              method: "resources/list",
-              params: {
-                cursor: request.params?.cursor,
-                _meta: request.params?._meta,
-              },
+          let activeSession = session;
+          const result = await requestWithSessionRecovery({
+            pool: mcpServerPool,
+            sessionId,
+            serverUuid: uuid,
+            params,
+            namespaceUuid,
+            operation: "resources/list",
+            serverName,
+            session,
+            attempt: (active) =>
+              active.client.request(
+                {
+                  method: "resources/list",
+                  params: {
+                    cursor: request.params?.cursor,
+                    _meta: request.params?._meta,
+                  },
+                },
+                ListResourcesResultSchema,
+              ),
+            onFreshSession: (fresh) => {
+              activeSession = fresh;
             },
-            ListResourcesResultSchema,
-          );
+          });
 
           if (result.resources) {
             const resourcesWithSource = result.resources.map((resource) => {
-              resourceToClient[resource.uri] = session;
+              resourceToClient[resource.uri] = activeSession;
               return {
                 ...resource,
                 name: resource.name || "",
@@ -727,9 +830,16 @@ export const createServer = async (
           }
         } catch (error) {
           logger.error(`Error fetching resources from: ${serverName}`, error);
+          failedServers.push(serverName || uuid);
         }
       }),
     );
+
+    if (failedServers.length > 0) {
+      logger.error(
+        `resources/list DEGRADED for namespace ${namespaceUuid}: ${failedServers.length} backend server(s) failed (${failedServers.join(", ")}); returning ${allResources.length} resources`,
+      );
+    }
 
     return {
       resources: allResources,
@@ -777,6 +887,7 @@ export const createServer = async (
         includeInactiveServers,
       );
       const allTemplates: ResourceTemplate[] = [];
+      const failedServers: string[] = [];
 
       // Track visited servers to detect circular references - reset on each call
       const visitedServers = new Set<string>();
@@ -814,7 +925,13 @@ export const createServer = async (
             params,
             namespaceUuid,
           );
-          if (!session) return;
+          if (!session) {
+            logger.error(
+              `resources/templates/list: no session available for server ${params.name || uuid} — excluded from namespace response (error state, connection cap, or backend unreachable)`,
+            );
+            failedServers.push(params.name || uuid);
+            return;
+          }
 
           // Now check for self-referencing using the actual MCP server name
           const serverVersion = session.client.getServerVersion();
@@ -835,16 +952,30 @@ export const createServer = async (
             params.name || session.client.getServerVersion()?.name || "";
 
           try {
-            const result = await session.client.request(
-              {
-                method: "resources/templates/list",
-                params: {
-                  cursor: request.params?.cursor,
-                  _meta: request.params?._meta,
-                },
-              },
-              ListResourceTemplatesResultSchema,
-            );
+            // No per-client map to repoint here (templates aren't keyed to a
+            // client), so onFreshSession is omitted — the recovery still
+            // invalidates + retries on the fresh session.
+            const result = await requestWithSessionRecovery({
+              pool: mcpServerPool,
+              sessionId,
+              serverUuid: uuid,
+              params,
+              namespaceUuid,
+              operation: "resources/templates/list",
+              serverName,
+              session,
+              attempt: (active) =>
+                active.client.request(
+                  {
+                    method: "resources/templates/list",
+                    params: {
+                      cursor: request.params?.cursor,
+                      _meta: request.params?._meta,
+                    },
+                  },
+                  ListResourceTemplatesResultSchema,
+                ),
+            });
 
             if (result.resourceTemplates) {
               const templatesWithSource = result.resourceTemplates.map(
@@ -860,10 +991,17 @@ export const createServer = async (
               `Error fetching resource templates from: ${serverName}`,
               error,
             );
+            failedServers.push(serverName || uuid);
             return;
           }
         }),
       );
+
+      if (failedServers.length > 0) {
+        logger.error(
+          `resources/templates/list DEGRADED for namespace ${namespaceUuid}: ${failedServers.length} backend server(s) failed (${failedServers.join(", ")}); returning ${allTemplates.length} templates`,
+        );
+      }
 
       return {
         resourceTemplates: allTemplates,
