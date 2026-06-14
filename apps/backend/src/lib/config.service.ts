@@ -95,6 +95,8 @@ export const configService = {
     const config = await configRepo.getConfig(
       ConfigKeyEnum.Enum.MCP_MAX_ATTEMPTS,
     );
+    // Default to 3: a single transient blip (e.g. a slow cold-cache `uvx`
+    // spawn) shouldn't immediately flag a server as ERROR.
     return config?.value ? parseInt(config.value, 10) : 3;
   },
 
