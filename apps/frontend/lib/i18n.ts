@@ -1,11 +1,13 @@
 // Client-side i18n utilities
-export const SUPPORTED_LOCALES = ["en", "zh", "ko"] as const;
+export const SUPPORTED_LOCALES = ["en", "zh", "ko", "pt", "es"] as const;
 export type SupportedLocale = (typeof SUPPORTED_LOCALES)[number];
 
 export const LOCALE_NAMES = {
   en: "English",
   zh: "中文",
   ko: "한국어",
+  pt: "Português",
+  es: "Español",
 } as const;
 
 // Type for translations
@@ -197,6 +199,132 @@ export async function loadTranslations(
       inspector: { ...englishDict.inspector, ...inspectorKo.default },
       logs: { ...englishDict.logs, ...logsKo.default },
       validation: { ...englishDict.validation, ...validationKo.default },
+    };
+  } else if (locale === "pt") {
+    // Load Portuguese translations with fallback to English
+    const [
+      commonPt,
+      authPt,
+      navigationPt,
+      mcpServersPt,
+      namespacesPt,
+      endpointsPt,
+      apiKeysPt,
+      settingsPt,
+      searchPt,
+      inspectorPt,
+      logsPt,
+      validationPt,
+    ] = await Promise.all([
+      import("../public/locales/pt/common.json").catch(() => ({ default: {} })),
+      import("../public/locales/pt/auth.json").catch(() => ({ default: {} })),
+      import("../public/locales/pt/navigation.json").catch(() => ({
+        default: {},
+      })),
+      import("../public/locales/pt/mcp-servers.json").catch(() => ({
+        default: {},
+      })),
+      import("../public/locales/pt/namespaces.json").catch(() => ({
+        default: {},
+      })),
+      import("../public/locales/pt/endpoints.json").catch(() => ({
+        default: {},
+      })),
+      import("../public/locales/pt/api-keys.json").catch(() => ({
+        default: {},
+      })),
+      import("../public/locales/pt/settings.json").catch(() => ({
+        default: {},
+      })),
+      import("../public/locales/pt/search.json").catch(() => ({ default: {} })),
+      import("../public/locales/pt/inspector.json").catch(() => ({
+        default: {},
+      })),
+      import("../public/locales/pt/logs.json").catch(() => ({ default: {} })),
+      import("../public/locales/pt/validation.json").catch(() => ({
+        default: {},
+      })),
+    ]);
+
+    // Get English fallback
+    const englishDict = await loadTranslations("en");
+
+    return {
+      common: { ...englishDict.common, ...commonPt.default },
+      auth: { ...englishDict.auth, ...authPt.default },
+      navigation: { ...englishDict.navigation, ...navigationPt.default },
+      "mcp-servers": { ...englishDict["mcp-servers"], ...mcpServersPt.default },
+      namespaces: { ...englishDict.namespaces, ...namespacesPt.default },
+      endpoints: { ...englishDict.endpoints, ...endpointsPt.default },
+      "api-keys": { ...englishDict["api-keys"], ...apiKeysPt.default },
+      settings: { ...englishDict.settings, ...settingsPt.default },
+      search: { ...englishDict.search, ...searchPt.default },
+      inspector: { ...englishDict.inspector, ...inspectorPt.default },
+      logs: { ...englishDict.logs, ...logsPt.default },
+      validation: { ...englishDict.validation, ...validationPt.default },
+    };
+  } else if (locale === "es") {
+    // Load Spanish translations with fallback to English
+    const [
+      commonEs,
+      authEs,
+      navigationEs,
+      mcpServersEs,
+      namespacesEs,
+      endpointsEs,
+      apiKeysEs,
+      settingsEs,
+      searchEs,
+      inspectorEs,
+      logsEs,
+      validationEs,
+    ] = await Promise.all([
+      import("../public/locales/es/common.json").catch(() => ({ default: {} })),
+      import("../public/locales/es/auth.json").catch(() => ({ default: {} })),
+      import("../public/locales/es/navigation.json").catch(() => ({
+        default: {},
+      })),
+      import("../public/locales/es/mcp-servers.json").catch(() => ({
+        default: {},
+      })),
+      import("../public/locales/es/namespaces.json").catch(() => ({
+        default: {},
+      })),
+      import("../public/locales/es/endpoints.json").catch(() => ({
+        default: {},
+      })),
+      import("../public/locales/es/api-keys.json").catch(() => ({
+        default: {},
+      })),
+      import("../public/locales/es/settings.json").catch(() => ({
+        default: {},
+      })),
+      import("../public/locales/es/search.json").catch(() => ({ default: {} })),
+      import("../public/locales/es/inspector.json").catch(() => ({
+        default: {},
+      })),
+      import("../public/locales/es/logs.json").catch(() => ({ default: {} })),
+      import("../public/locales/es/validation.json").catch(() => ({
+        default: {},
+      })),
+    ]);
+
+    // Get English fallback
+    const englishDict = await loadTranslations("en");
+
+    return {
+      common: { ...englishDict.common, ...commonEs.default },
+      auth: { ...englishDict.auth, ...authEs.default },
+      navigation: { ...englishDict.navigation, ...navigationEs.default },
+      "mcp-servers": { ...englishDict["mcp-servers"], ...mcpServersEs.default },
+      namespaces: { ...englishDict.namespaces, ...namespacesEs.default },
+      endpoints: { ...englishDict.endpoints, ...endpointsEs.default },
+      "api-keys": { ...englishDict["api-keys"], ...apiKeysEs.default },
+      settings: { ...englishDict.settings, ...settingsEs.default },
+      search: { ...englishDict.search, ...searchEs.default },
+      inspector: { ...englishDict.inspector, ...inspectorEs.default },
+      logs: { ...englishDict.logs, ...logsEs.default },
+      validation: { ...englishDict.validation, ...validationEs.default },
     };
   } else {
     // Fallback to English for unsupported locales
