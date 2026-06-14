@@ -269,6 +269,9 @@ export const endpointsTable = pgTable(
     use_query_param_auth: boolean("use_query_param_auth")
       .notNull()
       .default(false),
+    enable_metamcp_admin_tools: boolean("enable_metamcp_admin_tools")
+      .notNull()
+      .default(false),
     created_at: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),

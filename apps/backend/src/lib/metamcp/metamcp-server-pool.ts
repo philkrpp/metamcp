@@ -2,15 +2,22 @@ import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 
 import logger from "@/utils/logger";
 
+import { clearAdminToolsContext, setAdminToolsContext } from "../admin-mcp/admin-session-context";
 import { configService } from "../config.service";
 import { getMcpServers } from "./fetch-metamcp";
 import { anyServerRequiresForwardedHeaders } from "./header-forwarding";
 import { mcpServerPool } from "./mcp-server-pool";
 import { createServer } from "./metamcp-proxy";
 
+export interface AdminToolsOptions {
+  enabled: boolean;
+  userId: string;
+}
+
 export interface MetaMcpServerInstance {
   server: Server;
   cleanup: () => Promise<void>;
+  internalSessionId: string;
 }
 
 export interface MetaMcpServerPoolStatus {
@@ -75,6 +82,7 @@ export class MetaMcpServerPool {
     namespaceUuid: string,
     includeInactiveServers: boolean = false,
     clientRequestHeaders?: Record<string, string>,
+    adminTools?: AdminToolsOptions,
   ): Promise<MetaMcpServerInstance | undefined> {
     // Check if we already have an active server for this sessionId
     if (this.activeServers[sessionId]) {
@@ -111,6 +119,7 @@ export class MetaMcpServerPool {
         this.activeServers[sessionId] = idleServer;
         this.sessionToNamespace[sessionId] = namespaceUuid;
         this.sessionTimestamps[sessionId] = Date.now();
+        this.applyAdminToolsContext(idleServer, adminTools);
 
         logger.info(
           `Converted idle MetaMCP server to active for namespace ${namespaceUuid}, session ${sessionId}`,
@@ -137,6 +146,7 @@ export class MetaMcpServerPool {
     this.activeServers[sessionId] = newServer;
     this.sessionToNamespace[sessionId] = namespaceUuid;
     this.sessionTimestamps[sessionId] = Date.now();
+    this.applyAdminToolsContext(newServer, adminTools);
 
     logger.info(
       `Created new active MetaMCP server for namespace ${namespaceUuid}, session ${sessionId}`,
@@ -150,6 +160,17 @@ export class MetaMcpServerPool {
     }
 
     return newServer;
+  }
+
+  private applyAdminToolsContext(
+    serverInstance: MetaMcpServerInstance,
+    adminTools?: AdminToolsOptions,
+  ): void {
+    if (adminTools?.enabled && adminTools.userId) {
+      setAdminToolsContext(serverInstance.internalSessionId, adminTools);
+    } else {
+      clearAdminToolsContext(serverInstance.internalSessionId);
+    }
   }
 
   /**
@@ -170,7 +191,11 @@ export class MetaMcpServerPool {
         clientRequestHeaders,
       );
 
-      return serverInstance;
+      return {
+        server: serverInstance.server,
+        cleanup: serverInstance.cleanup,
+        internalSessionId: serverInstance.internalSessionId,
+      };
     } catch (error) {
       logger.error(
         `Error creating MetaMCP server for namespace ${namespaceUuid}:`,
@@ -205,6 +230,7 @@ export class MetaMcpServerPool {
       const wrappedServer: MetaMcpServerInstance = {
         server: newServer.server,
         cleanup: newServer.cleanup,
+        internalSessionId: newServer.internalSessionId,
       };
 
       this.idleServers[namespaceUuid] = wrappedServer;
@@ -239,6 +265,7 @@ export class MetaMcpServerPool {
           const wrappedServer: MetaMcpServerInstance = {
             server: newServer.server,
             cleanup: newServer.cleanup,
+            internalSessionId: newServer.internalSessionId,
           };
           this.idleServers[namespaceUuid] = wrappedServer;
           logger.info(
@@ -291,11 +318,13 @@ export class MetaMcpServerPool {
       return;
     }
 
+    clearAdminToolsContext(activeServer.internalSessionId);
+
     // Cleanup the MetaMCP server
     await activeServer.cleanup();
 
     // Also cleanup the corresponding MCP server pool session
-    await mcpServerPool.cleanupSession(sessionId);
+    await mcpServerPool.cleanupSession(activeServer.internalSessionId);
 
     // Remove from active servers
     delete this.activeServers[sessionId];

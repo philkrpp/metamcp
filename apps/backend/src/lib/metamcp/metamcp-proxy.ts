@@ -24,6 +24,12 @@ import { z } from "zod";
 import logger from "@/utils/logger";
 
 import { namespacesRepository } from "../../db/repositories/namespaces.repo";
+import { getAdminToolsContext } from "../admin-mcp/admin-session-context";
+import {
+  executeAdminTool,
+  getAdminToolsForMcp,
+  isExposedAdminToolName,
+} from "../admin-mcp/tools-registry";
 import { toolsImplementations } from "../../trpc/tools.impl";
 import { configService } from "../config.service";
 import { ConnectedClient } from "./client";
@@ -658,10 +664,32 @@ export const createServer = async (
 
   // Set up the handlers with middleware
   server.setRequestHandler(ListToolsRequestSchema, async (request) => {
-    return await listToolsWithMiddleware(request, handlerContext);
+    const result = await listToolsWithMiddleware(request, handlerContext);
+    const adminContext = getAdminToolsContext(handlerContext.sessionId);
+
+    if (adminContext?.enabled && adminContext.userId) {
+      result.tools.push(...getAdminToolsForMcp());
+    }
+
+    return result;
   });
 
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
+    if (isExposedAdminToolName(request.params.name)) {
+      const adminContext = getAdminToolsContext(handlerContext.sessionId);
+      if (!adminContext?.enabled || !adminContext.userId) {
+        throw new Error(
+          `Access denied to MetaMCP admin tool: ${request.params.name}`,
+        );
+      }
+
+      return executeAdminTool(
+        request.params.name,
+        adminContext.userId,
+        request.params.arguments,
+      );
+    }
+
     return await callToolWithMiddleware(request, handlerContext);
   });
 
@@ -1179,5 +1207,5 @@ export const createServer = async (
     await mcpServerPool.cleanupSession(sessionId);
   };
 
-  return { server, cleanup };
+  return { server, cleanup, internalSessionId: sessionId };
 };
