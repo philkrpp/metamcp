@@ -5,6 +5,7 @@ import logger from "@/utils/logger";
 import { configService } from "../config.service";
 import { ConnectedClient, connectMetaMcpClient } from "./client";
 import { serverRequiresForwardedHeaders } from "./header-forwarding";
+import { metamcpLogStore } from "./log-store";
 import { serverErrorTracker } from "./server-error-tracker";
 
 export interface McpServerPoolStatus {
@@ -275,6 +276,11 @@ export class McpServerPool {
     logger.info(
       `Creating new connection for server ${params.name} (${params.uuid}) with namespace: ${namespaceUuid || "none"}`,
     );
+    metamcpLogStore.addLog(
+      params.name,
+      "info",
+      `Creating new connection for namespace ${namespaceUuid || "none"}`,
+    );
 
     const connectedClient = await connectMetaMcpClient(
       params,
@@ -352,6 +358,11 @@ export class McpServerPool {
         if (!this.idleSessions[serverUuid] && currentGeneration === generation) {
           this.idleSessions[serverUuid] = newClient;
           logger.info(`Created idle session for server ${serverUuid}`);
+          metamcpLogStore.addLog(
+            params.name,
+            "info",
+            `Created idle session for server ${serverUuid}`,
+          );
         } else {
           // Either a concurrent call already stored an idle session, or
           // invalidateIdleSession() bumped the generation while we were awaiting,
@@ -408,6 +419,11 @@ export class McpServerPool {
           this.idleSessions[serverUuid] = newClient;
           logger.info(
             `Created background idle session for server [${params.name}] ${serverUuid}`,
+          );
+          metamcpLogStore.addLog(
+            params.name,
+            "info",
+            `Created background idle session for server ${serverUuid}`,
           );
           if (namespaceUuid) {
             this.setBackgroundIdleSessionsByNamespace(

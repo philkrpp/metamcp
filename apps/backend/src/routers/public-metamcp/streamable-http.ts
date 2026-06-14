@@ -13,6 +13,7 @@ import logger from "@/utils/logger";
 
 import { buildAdminToolsOptions } from "../../lib/admin-mcp/build-admin-tools-options";
 import { extractClientHeaders } from "../../lib/metamcp/header-forwarding";
+import { MetaMCPHandlerContext } from "../../lib/metamcp/metamcp-middleware/functional-middleware";
 import { metaMcpServerPool } from "../../lib/metamcp/metamcp-server-pool";
 import { SessionLifetimeManagerImpl } from "../../lib/session-lifetime-manager";
 
@@ -23,6 +24,46 @@ const sessionManager =
   new SessionLifetimeManagerImpl<StreamableHTTPServerTransport>(
     "StreamableHTTP",
   );
+
+function getRequestContext(
+  req: ApiKeyAuthenticatedRequest,
+): Pick<MetaMCPHandlerContext, "endpointName" | "auth"> {
+  return {
+    endpointName: req.endpointName,
+    auth: {
+      method: req.authMethod || "none",
+      apiKeyUuid: req.apiKeyUuid,
+      apiKeyUserId: req.apiKeyUserId,
+      oauthUserId: req.oauthUserId,
+    },
+  };
+}
+
+function normalizeStreamableHttpAcceptHeader(req: express.Request) {
+  const acceptHeader = req.headers.accept;
+  const acceptsJson =
+    typeof acceptHeader === "string" &&
+    acceptHeader.includes("application/json");
+  const acceptsEventStream =
+    typeof acceptHeader === "string" &&
+    acceptHeader.includes("text/event-stream");
+
+  // SDK requires both types in Accept to pass validation (returns 406 otherwise).
+  if (!acceptsJson || !acceptsEventStream) {
+    req.headers.accept = "application/json, text/event-stream";
+  }
+}
+
+function getSafeHeaders(req: express.Request): Record<string, unknown> {
+  const headers = { ...req.headers };
+  if (headers.authorization) {
+    headers.authorization = "<redacted>";
+  }
+  if (headers["x-api-key"]) {
+    headers["x-api-key"] = "<redacted>";
+  }
+  return headers;
+}
 
 // Cleanup function for a specific session
 const cleanupSession = async (
@@ -100,6 +141,7 @@ streamableHttpRouter.get(
         return;
       } else {
         logger.info(`Found session ${sessionId}, handling request`);
+        normalizeStreamableHttpAcceptHeader(req);
         await transport.handleRequest(req, res);
       }
     } catch (error) {
@@ -123,6 +165,14 @@ streamableHttpRouter.post(
     logger.info(`POST /mcp request for endpoint: ${endpointName}`);
     logger.info(`Authentication method: ${authReq.authMethod || "none"}`);
     logger.info(`Session ID: ${sessionId || "new session"}`);
+    logger.info("StreamableHTTP request headers:", getSafeHeaders(req));
+
+    res.on("finish", () => {
+      logger.info(
+        `StreamableHTTP response finished with status ${res.statusCode}`,
+      );
+      logger.info("StreamableHTTP response headers:", res.getHeaders());
+    });
 
     if (!sessionId) {
       try {
@@ -151,6 +201,7 @@ streamableHttpRouter.post(
           false,
           clientRequestHeaders,
           adminTools,
+          getRequestContext(authReq),
         );
         if (!mcpServerInstance) {
           throw new Error("Failed to get MetaMCP server instance from pool");
@@ -162,6 +213,7 @@ streamableHttpRouter.post(
 
         // Create transport with the predetermined session ID
         const transport = new StreamableHTTPServerTransport({
+          enableJsonResponse: true,
           sessionIdGenerator: () => newSessionId,
           onsessioninitialized: async (sessionId) => {
             try {
@@ -198,6 +250,8 @@ streamableHttpRouter.post(
         await mcpServerInstance.server.connect(transport);
 
         // Now handle the request - server is guaranteed to be ready
+        normalizeStreamableHttpAcceptHeader(req);
+        res.type("application/json");
         await transport.handleRequest(req, res);
       } catch (error) {
         logger.error("Error in public endpoint /mcp POST route:", error);
@@ -236,6 +290,8 @@ streamableHttpRouter.post(
           });
         } else {
           logger.info(`Found session ${sessionId}, handling request`);
+          normalizeStreamableHttpAcceptHeader(req);
+          res.type("application/json");
           await transport.handleRequest(req, res);
         }
       } catch (error) {

@@ -7,6 +7,7 @@ import { configService } from "../config.service";
 import { getMcpServers } from "./fetch-metamcp";
 import { anyServerRequiresForwardedHeaders } from "./header-forwarding";
 import { mcpServerPool } from "./mcp-server-pool";
+import { MetaMCPHandlerContext } from "./metamcp-middleware/functional-middleware";
 import { createServer } from "./metamcp-proxy";
 
 export interface AdminToolsOptions {
@@ -83,6 +84,7 @@ export class MetaMcpServerPool {
     includeInactiveServers: boolean = false,
     clientRequestHeaders?: Record<string, string>,
     adminTools?: AdminToolsOptions,
+    requestContext?: Pick<MetaMCPHandlerContext, "endpointName" | "auth">,
   ): Promise<MetaMcpServerInstance | undefined> {
     // Check if we already have an active server for this sessionId
     if (this.activeServers[sessionId]) {
@@ -109,6 +111,13 @@ export class MetaMcpServerPool {
           expiresAt: Date.now() + 60_000, // 60s TTL
         };
       }
+    }
+
+    // Audited requests need a fresh server too: idle servers are built without
+    // request auth context, so the handler context would be scoped to the wrong
+    // (or no) endpoint session. Force a fresh build when requestContext is set.
+    if (requestContext) {
+      needsFreshServer = true;
     }
 
     if (!needsFreshServer) {
@@ -138,6 +147,7 @@ export class MetaMcpServerPool {
       namespaceUuid,
       includeInactiveServers,
       clientRequestHeaders,
+      requestContext,
     );
     if (!newServer) {
       return undefined;
@@ -181,6 +191,7 @@ export class MetaMcpServerPool {
     namespaceUuid: string,
     includeInactiveServers: boolean = false,
     clientRequestHeaders?: Record<string, string>,
+    requestContext?: Pick<MetaMCPHandlerContext, "endpointName" | "auth">,
   ): Promise<MetaMcpServerInstance | undefined> {
     try {
       // Create the MetaMCP server - MCP server pool is pre-warmed during startup
@@ -189,6 +200,7 @@ export class MetaMcpServerPool {
         sessionId,
         includeInactiveServers,
         clientRequestHeaders,
+        requestContext,
       );
 
       return {

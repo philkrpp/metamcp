@@ -37,6 +37,7 @@ import { getMcpServers } from "./fetch-metamcp";
 import { extractForwardedHeaders, mergeHeaders } from "./header-forwarding";
 import { requestWithSessionRecovery } from "./list-handler-recovery";
 import { mcpServerPool } from "./mcp-server-pool";
+import { createAuditCallToolMiddleware } from "./metamcp-middleware/audit-requests.functional";
 import {
   createFilterCallToolMiddleware,
   createFilterListToolsMiddleware,
@@ -47,6 +48,7 @@ import {
   ListToolsHandler,
   MetaMCPHandlerContext,
 } from "./metamcp-middleware/functional-middleware";
+import { resolveToolIdentity } from "./metamcp-middleware/tool-identity";
 import {
   createToolOverridesCallToolMiddleware,
   createToolOverridesListToolsMiddleware,
@@ -112,6 +114,7 @@ export const createServer = async (
   sessionId: string,
   includeInactiveServers: boolean = false,
   clientRequestHeaders?: Record<string, string>,
+  requestContext?: Pick<MetaMCPHandlerContext, "endpointName" | "auth">,
 ) => {
   const toolToClient: Record<string, ConnectedClient> = {};
   const toolToServerUuid: Record<string, string> = {};
@@ -160,6 +163,8 @@ export const createServer = async (
     namespaceUuid,
     sessionId,
     clientRequestHeaders,
+    endpointName: requestContext?.endpointName || "unknown",
+    auth: requestContext?.auth,
   };
 
   // Original List Tools Handler
@@ -651,6 +656,7 @@ export const createServer = async (
   )(originalListToolsHandler);
 
   const callToolWithMiddleware = compose(
+    createAuditCallToolMiddleware({ resolveToolIdentity }),
     createFilterCallToolMiddleware({
       cacheEnabled: true,
       customErrorMessage: (toolName, reason) =>
@@ -658,7 +664,6 @@ export const createServer = async (
     }),
     createToolOverridesCallToolMiddleware({ cacheEnabled: true }),
     // Add more middleware here as needed
-    // createAuditingMiddleware(),
     // createAuthorizationMiddleware(),
   )(originalCallToolHandler);
 
