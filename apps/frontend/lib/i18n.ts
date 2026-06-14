@@ -281,6 +281,7 @@ export async function loadTranslations(
       inspector: { ...englishDict.inspector, ...inspectorPt.default },
       logs: { ...englishDict.logs, ...logsPt.default },
       validation: { ...englishDict.validation, ...validationPt.default },
+      "audit-logs": { ...englishDict["audit-logs"] },
     };
   } else if (locale === "es") {
     // Load Spanish translations with fallback to English
@@ -344,6 +345,7 @@ export async function loadTranslations(
       inspector: { ...englishDict.inspector, ...inspectorEs.default },
       logs: { ...englishDict.logs, ...logsEs.default },
       validation: { ...englishDict.validation, ...validationEs.default },
+      "audit-logs": { ...englishDict["audit-logs"] },
     };
   } else {
     // Fallback to English for unsupported locales

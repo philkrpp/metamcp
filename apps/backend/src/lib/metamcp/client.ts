@@ -149,11 +149,10 @@ export const createMetaMcpClient = (
       version: "2.0.0",
     },
     {
-      capabilities: {
-        prompts: {},
-        resources: { subscribe: true },
-        tools: {},
-      },
+      // MetaMCP connects to backend servers as a client; prompts/resources/tools
+      // are server-side capabilities and are no longer valid here under MCP SDK
+      // 1.26's tightened client capability type.
+      capabilities: {},
     },
   );
   return { client, transport };

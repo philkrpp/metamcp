@@ -66,9 +66,12 @@ export const executeToolWithMiddleware = async (
 
     // Check if the result indicates an error (from middleware)
     if (result.isError) {
+      const firstBlock = result.content?.[0];
+      const message =
+        firstBlock && "text" in firstBlock ? firstBlock.text : undefined;
       return res.status(403).json({
         error: "Tool access denied",
-        message: result.content?.[0]?.text || "Tool is inactive",
+        message: message || "Tool is inactive",
         timestamp: new Date().toISOString(),
       });
     }

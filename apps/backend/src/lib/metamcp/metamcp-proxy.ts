@@ -7,12 +7,15 @@ import {
   GetPromptRequestSchema,
   GetPromptResultSchema,
   ListPromptsRequestSchema,
+  ListPromptsResult,
   ListPromptsResultSchema,
   ListResourcesRequestSchema,
+  ListResourcesResult,
   ListResourcesResultSchema,
   ListResourceTemplatesRequestSchema,
   ListResourceTemplatesResultSchema,
   ListToolsRequestSchema,
+  ListToolsResult,
   ListToolsResultSchema,
   ReadResourceRequestSchema,
   ReadResourceResultSchema,
@@ -308,7 +311,7 @@ export const createServer = async (
             let hasMore = true;
 
             while (hasMore) {
-              const result: z.infer<typeof ListToolsResultSchema> =
+              const result: ListToolsResult =
                 await active.client.request(
                   {
                     method: "tools/list",
@@ -502,7 +505,7 @@ export const createServer = async (
                 let hasMore = true;
 
                 while (hasMore && !foundTool) {
-                  const result: z.infer<typeof ListToolsResultSchema> =
+                  const result: ListToolsResult =
                     await session.client.request(
                       {
                         method: "tools/list",
@@ -745,7 +748,7 @@ export const createServer = async (
       namespaceUuid,
       includeInactiveServers,
     );
-    const allPrompts: z.infer<typeof ListPromptsResultSchema>["prompts"] = [];
+    const allPrompts: ListPromptsResult["prompts"] = [];
     const failedServers: string[] = [];
 
     // Extract forwarded headers from client request for servers that need them
@@ -890,7 +893,7 @@ export const createServer = async (
       namespaceUuid,
       includeInactiveServers,
     );
-    const allResources: z.infer<typeof ListResourcesResultSchema>["resources"] =
+    const allResources: ListResourcesResult["resources"] =
       [];
     const failedServers: string[] = [];
 
