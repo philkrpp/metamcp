@@ -85,9 +85,11 @@ export class McpServerPool {
     maxConnectionsPerServer: number = 5,
   ): McpServerPool {
     if (!McpServerPool.instance) {
+      const envMax = parseInt(process.env.MAX_TOTAL_CONNECTIONS || "", 10);
+      const maxConn = Number.isFinite(envMax) && envMax > 0 ? envMax : 100;
       McpServerPool.instance = new McpServerPool(
         defaultIdleCount,
-        100,
+        maxConn,
         maxConnectionsPerServer,
       );
     }
