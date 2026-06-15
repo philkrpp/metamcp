@@ -31,6 +31,9 @@ export class OAuthSessionsRepository {
         }),
         ...(input.tokens && { tokens: input.tokens }),
         ...(input.code_verifier && { code_verifier: input.code_verifier }),
+        ...(input.expected_state && {
+          expected_state: input.expected_state,
+        }),
       })
       .returning();
 
@@ -48,9 +51,32 @@ export class OAuthSessionsRepository {
         }),
         ...(input.tokens && { tokens: input.tokens }),
         ...(input.code_verifier && { code_verifier: input.code_verifier }),
+        ...(input.expected_state && {
+          expected_state: input.expected_state,
+        }),
         updated_at: sql`NOW()`,
       })
       .where(eq(oauthSessionsTable.mcp_server_uuid, input.mcp_server_uuid))
+      .returning();
+
+    return updatedSession;
+  }
+
+  // Dedicated clear path for `expected_state`. The truthy-spread upsert
+  // cannot write NULL through `input.expected_state` (a `null` value would
+  // be elided by the `&&` guard), so the one-shot clear after a successful
+  // token exchange goes through this method instead. Returns the updated
+  // row, or undefined if no row exists for the server.
+  async clearExpectedState(
+    mcpServerUuid: string,
+  ): Promise<DatabaseOAuthSession | undefined> {
+    const [updatedSession] = await db
+      .update(oauthSessionsTable)
+      .set({
+        expected_state: null,
+        updated_at: sql`NOW()`,
+      })
+      .where(eq(oauthSessionsTable.mcp_server_uuid, mcpServerUuid))
       .returning();
 
     return updatedSession;

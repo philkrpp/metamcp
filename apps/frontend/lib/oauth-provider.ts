@@ -12,6 +12,21 @@ import { getServerSpecificKey, SESSION_KEYS } from "./constants";
 import { getAppUrl } from "./env";
 import { vanillaTrpcClient } from "./trpc";
 
+// base64url (RFC 4648 §5) encoding of a byte array. Uses btoa for the
+// classic base64 step then trims/replaces to the url-safe variant. Browsers
+// only — the SDK's `auth()` calls this from `state()` which runs in the
+// browser path; no need for a Node fallback here.
+function base64UrlEncode(bytes: Uint8Array): string {
+  let binary = "";
+  for (const byte of bytes) {
+    binary += String.fromCharCode(byte);
+  }
+  return btoa(binary)
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
+}
+
 // OAuth client provider that works with a specific MCP server
 class DbOAuthClientProvider implements OAuthClientProvider {
   private mcpServerUuid: string;
@@ -173,6 +188,45 @@ class DbOAuthClientProvider implements OAuthClientProvider {
   redirectToAuthorization(authorizationUrl: URL) {
     this.ensureServerUrlStored();
     window.location.href = authorizationUrl.href;
+  }
+
+  // RFC 6749 §10.12 CSRF defence: generate a per-flow random `state`, persist
+  // it server-side (`oauth_sessions.expected_state`), and return it for
+  // inclusion in the upstream's /authorize URL. The SDK invokes this once
+  // per authorize attempt (see `auth.js` in @modelcontextprotocol/sdk). On
+  // the callback path the backend compares the echoed value to the
+  // persisted one at `exchangeToken` and clears the column on success.
+  //
+  // The value never round-trips through sessionStorage because the backend
+  // is the source of truth — the frontend only needs to forward what the
+  // upstream echoed back, which arrives in the callback URL.
+  async state(): Promise<string> {
+    // 16 random bytes encoded as base64url → ~22 chars, well over the
+    // ~128-bit-entropy bar in RFC 6749 §10.10.
+    const bytes = new Uint8Array(16);
+    crypto.getRandomValues(bytes);
+    const stateValue = base64UrlEncode(bytes);
+
+    if (await this.serverExists()) {
+      try {
+        await vanillaTrpcClient.frontend.oauth.upsert.mutate({
+          mcp_server_uuid: this.mcpServerUuid,
+          expected_state: stateValue,
+        });
+      } catch (error) {
+        // Best-effort. If the upsert fails the upstream redirect still
+        // carries `stateValue`, but server-side validation will fall
+        // through the back-compat NULL branch — the CSRF check degrades
+        // to "skipped" rather than rejecting the flow. That is fail-open
+        // for CSRF specifically; PKCE plus `resolveOwnedServerUrl`'s
+        // ownership/SSRF guard still cover the practical attack surface.
+        // Logged so monitoring can alert on a sustained persistence
+        // failure, which would indicate the CSRF layer is silently off.
+        console.error("Error persisting expected_state to database:", error);
+      }
+    }
+
+    return stateValue;
   }
 
   async saveCodeVerifier(codeVerifier: string) {

@@ -12,6 +12,7 @@ vi.mock("../db/repositories", () => ({
   oauthSessionsRepository: {
     findByMcpServerUuid: vi.fn(),
     upsert: vi.fn(),
+    clearExpectedState: vi.fn(),
   },
   mcpServersRepository: {
     findByUuid: vi.fn(),
@@ -48,6 +49,8 @@ describe("oauthImplementations.exchangeToken", () => {
       findByMcpServerUuid: repos.oauthSessionsRepository
         .findByMcpServerUuid as ReturnType<typeof vi.fn>,
       upsert: repos.oauthSessionsRepository.upsert as ReturnType<typeof vi.fn>,
+      clearExpectedState: repos.oauthSessionsRepository
+        .clearExpectedState as ReturnType<typeof vi.fn>,
       findServerByUuid: repos.mcpServersRepository.findByUuid as ReturnType<
         typeof vi.fn
       >,
@@ -298,6 +301,8 @@ describe("exchangeToken redirect_uri byte-match", () => {
       findByMcpServerUuid: repos.oauthSessionsRepository
         .findByMcpServerUuid as ReturnType<typeof vi.fn>,
       upsert: repos.oauthSessionsRepository.upsert as ReturnType<typeof vi.fn>,
+      clearExpectedState: repos.oauthSessionsRepository
+        .clearExpectedState as ReturnType<typeof vi.fn>,
       findServerByUuid: repos.mcpServersRepository.findByUuid as ReturnType<
         typeof vi.fn
       >,
@@ -406,6 +411,8 @@ describe("oauthImplementations.refreshToken", () => {
       findByMcpServerUuid: repos.oauthSessionsRepository
         .findByMcpServerUuid as ReturnType<typeof vi.fn>,
       upsert: repos.oauthSessionsRepository.upsert as ReturnType<typeof vi.fn>,
+      clearExpectedState: repos.oauthSessionsRepository
+        .clearExpectedState as ReturnType<typeof vi.fn>,
       findServerByUuid: repos.mcpServersRepository.findByUuid as ReturnType<
         typeof vi.fn
       >,
@@ -509,5 +516,315 @@ describe("oauthImplementations.refreshToken", () => {
     );
     expect(result.success).toBe(false);
     if (!result.success) expect(result.error).toBe("no_refresh_token");
+  });
+});
+
+// RFC 6749 §10.12 state CSRF defence. The schema accepted `state` and the
+// callback forwarded it, but PR #295 never compared it to a persisted
+// value. These tests pin the validation behaviour added in #299:
+//   - expected_state truthy → must match input.state (and missing input.state
+//     is treated as a mismatch, NOT a bypass)
+//   - expected_state null/undefined → back-compat for in-flight pre-fix
+//     flows; the exchange proceeds without state validation
+//   - one-shot: on a successful exchange, expected_state is cleared so a
+//     replay cannot reuse the same code+state pair
+//   - on upstream error, expected_state is preserved so the user can retry
+//     the exchange without re-running authorize
+describe("exchangeToken state CSRF validation", () => {
+  beforeEach(() => {
+    process.env.APP_URL = "https://metamcp.example.com";
+    vi.clearAllMocks();
+  });
+  afterEach(() => {
+    process.env.APP_URL = ORIGINAL_APP_URL;
+  });
+
+  const loadModule = async () => {
+    const repos = await import("../db/repositories");
+    const impl = await import("./oauth.impl");
+    return {
+      oauthImplementations: impl.oauthImplementations,
+      findByMcpServerUuid: repos.oauthSessionsRepository
+        .findByMcpServerUuid as ReturnType<typeof vi.fn>,
+      upsert: repos.oauthSessionsRepository.upsert as ReturnType<typeof vi.fn>,
+      clearExpectedState: repos.oauthSessionsRepository
+        .clearExpectedState as ReturnType<typeof vi.fn>,
+      findServerByUuid: repos.mcpServersRepository.findByUuid as ReturnType<
+        typeof vi.fn
+      >,
+    };
+  };
+
+  const ownedServer = (uuid: string, url: string) => ({
+    uuid,
+    name: "test-server",
+    type: "STREAMABLE_HTTP" as const,
+    url,
+    user_id: "user-1",
+    description: null,
+    command: null,
+    args: [] as string[],
+    env: {},
+    error_status: "NONE" as const,
+    created_at: new Date(),
+    bearerToken: null,
+    headers: {},
+  });
+
+  const SERVER_UUID = "00000000-0000-0000-0000-0000000000aa";
+  const USER_ID = "user-1";
+
+  const upstreamSuccess = vi.fn(async (url: string, init?: RequestInit) => {
+    const urlStr = url;
+    if (urlStr.includes("/.well-known/")) {
+      return new Response("nope", { status: 404 });
+    }
+    void init;
+    return new Response(
+      JSON.stringify({
+        access_token: "AT",
+        token_type: "Bearer",
+        expires_in: 3600,
+      }),
+      { status: 200, headers: { "Content-Type": "application/json" } },
+    );
+  });
+
+  it("expected_state null in DB → exchange proceeds (back-compat for in-flight pre-fix flows)", async () => {
+    const {
+      oauthImplementations,
+      findByMcpServerUuid,
+      upsert,
+      clearExpectedState,
+      findServerByUuid,
+    } = await loadModule();
+    findServerByUuid.mockResolvedValue(
+      ownedServer(SERVER_UUID, "https://upstream.example.com/mcp"),
+    );
+    findByMcpServerUuid.mockResolvedValue({
+      uuid: "sess",
+      mcp_server_uuid: SERVER_UUID,
+      code_verifier: "v",
+      client_information: {
+        client_id: "c",
+        token_endpoint: "https://upstream.example.com/token",
+      },
+      tokens: null,
+      expected_state: null,
+    });
+    upsert.mockResolvedValue({});
+    clearExpectedState.mockResolvedValue({});
+
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(upstreamSuccess as unknown as typeof fetch);
+
+    const result = await oauthImplementations.exchangeToken(
+      { mcp_server_uuid: SERVER_UUID, code: "C", state: "from-upstream" },
+      USER_ID,
+    );
+
+    expect(result.success).toBe(true);
+    expect(upsert).toHaveBeenCalledTimes(1);
+    // Clear still runs to belt-and-braces against a future authorize seeding
+    // expected_state on this row.
+    expect(clearExpectedState).toHaveBeenCalledTimes(1);
+    fetchSpy.mockRestore();
+  });
+
+  it("expected_state matches input.state → exchange proceeds, clearExpectedState called once", async () => {
+    const {
+      oauthImplementations,
+      findByMcpServerUuid,
+      upsert,
+      clearExpectedState,
+      findServerByUuid,
+    } = await loadModule();
+    findServerByUuid.mockResolvedValue(
+      ownedServer(SERVER_UUID, "https://upstream.example.com/mcp"),
+    );
+    findByMcpServerUuid.mockResolvedValue({
+      mcp_server_uuid: SERVER_UUID,
+      code_verifier: "v",
+      client_information: {
+        client_id: "c",
+        token_endpoint: "https://upstream.example.com/token",
+      },
+      tokens: null,
+      expected_state: "the-nonce",
+    });
+    upsert.mockResolvedValue({});
+    clearExpectedState.mockResolvedValue({});
+
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(upstreamSuccess as unknown as typeof fetch);
+
+    const result = await oauthImplementations.exchangeToken(
+      { mcp_server_uuid: SERVER_UUID, code: "C", state: "the-nonce" },
+      USER_ID,
+    );
+
+    expect(result.success).toBe(true);
+    expect(clearExpectedState).toHaveBeenCalledWith(SERVER_UUID);
+    expect(clearExpectedState).toHaveBeenCalledTimes(1);
+    fetchSpy.mockRestore();
+  });
+
+  it("expected_state mismatches input.state → returns invalid_state, no upstream POST, no clear", async () => {
+    const {
+      oauthImplementations,
+      findByMcpServerUuid,
+      upsert,
+      clearExpectedState,
+      findServerByUuid,
+    } = await loadModule();
+    findServerByUuid.mockResolvedValue(
+      ownedServer(SERVER_UUID, "https://upstream.example.com/mcp"),
+    );
+    findByMcpServerUuid.mockResolvedValue({
+      mcp_server_uuid: SERVER_UUID,
+      code_verifier: "v",
+      client_information: { client_id: "c" },
+      tokens: null,
+      expected_state: "the-nonce",
+    });
+
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+
+    const result = await oauthImplementations.exchangeToken(
+      { mcp_server_uuid: SERVER_UUID, code: "C", state: "different-value" },
+      USER_ID,
+    );
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error).toBe("invalid_state");
+    }
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(upsert).not.toHaveBeenCalled();
+    expect(clearExpectedState).not.toHaveBeenCalled();
+    fetchSpy.mockRestore();
+  });
+
+  it("expected_state present but input.state missing → returns invalid_state (does not bypass)", async () => {
+    const {
+      oauthImplementations,
+      findByMcpServerUuid,
+      upsert,
+      clearExpectedState,
+      findServerByUuid,
+    } = await loadModule();
+    findServerByUuid.mockResolvedValue(
+      ownedServer(SERVER_UUID, "https://upstream.example.com/mcp"),
+    );
+    findByMcpServerUuid.mockResolvedValue({
+      mcp_server_uuid: SERVER_UUID,
+      code_verifier: "v",
+      client_information: { client_id: "c" },
+      tokens: null,
+      expected_state: "the-nonce",
+    });
+
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+
+    const result = await oauthImplementations.exchangeToken(
+      { mcp_server_uuid: SERVER_UUID, code: "C" }, // no state
+      USER_ID,
+    );
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error).toBe("invalid_state");
+    }
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(upsert).not.toHaveBeenCalled();
+    expect(clearExpectedState).not.toHaveBeenCalled();
+    fetchSpy.mockRestore();
+  });
+
+  it("expected_state matches but upstream returns OAuth error → expected_state preserved for retry", async () => {
+    const {
+      oauthImplementations,
+      findByMcpServerUuid,
+      upsert,
+      clearExpectedState,
+      findServerByUuid,
+    } = await loadModule();
+    findServerByUuid.mockResolvedValue(
+      ownedServer(SERVER_UUID, "https://upstream.example.com/mcp"),
+    );
+    findByMcpServerUuid.mockResolvedValue({
+      mcp_server_uuid: SERVER_UUID,
+      code_verifier: "v",
+      client_information: {
+        client_id: "c",
+        token_endpoint: "https://upstream.example.com/token",
+      },
+      tokens: null,
+      expected_state: "the-nonce",
+    });
+
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async (url) => {
+        const urlStr = typeof url === "string" ? url : (url as URL).toString();
+        if (urlStr.includes("/.well-known/")) {
+          return new Response("nope", { status: 404 });
+        }
+        return new Response(
+          JSON.stringify({
+            error: "invalid_grant",
+            error_description: "the code was already used",
+          }),
+          { status: 400, headers: { "Content-Type": "application/json" } },
+        );
+      });
+
+    const result = await oauthImplementations.exchangeToken(
+      { mcp_server_uuid: SERVER_UUID, code: "C", state: "the-nonce" },
+      USER_ID,
+    );
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error).toBe("invalid_grant");
+    }
+    expect(upsert).not.toHaveBeenCalled();
+    // Crucial: on upstream error the state nonce is NOT cleared so the user
+    // can retry the exchange without re-running the authorize flow.
+    expect(clearExpectedState).not.toHaveBeenCalled();
+    fetchSpy.mockRestore();
+  });
+
+  // Regression test for the persistence bug found in code review: the
+  // tRPC `upsert` handler previously stripped `expected_state` before
+  // calling the repo, leaving the DB column NULL and silently disabling
+  // the CSRF check at `exchangeToken` (which then falls through the
+  // back-compat NULL branch). Pins the forward-through behaviour so a
+  // future refactor of the spread cannot regress it.
+  it("frontend.oauth.upsert forwards expected_state to the repository", async () => {
+    const { oauthImplementations, upsert } = await loadModule();
+    upsert.mockResolvedValue({
+      uuid: "sess",
+      mcp_server_uuid: SERVER_UUID,
+      client_information: null,
+      tokens: null,
+      code_verifier: null,
+      created_at: new Date(),
+      updated_at: new Date(),
+    });
+
+    await oauthImplementations.upsert({
+      mcp_server_uuid: SERVER_UUID,
+      expected_state: "the-csrf-nonce",
+    });
+
+    expect(upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mcp_server_uuid: SERVER_UUID,
+        expected_state: "the-csrf-nonce",
+      }),
+    );
   });
 });

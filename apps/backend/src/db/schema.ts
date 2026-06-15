@@ -109,6 +109,12 @@ export const oauthSessionsTable = pgTable(
     // the call sites.
     tokens: jsonb("tokens").$type<UpstreamTokenResponse>(),
     code_verifier: text("code_verifier"),
+    // CSRF defence (RFC 6749 §10.12). Generated server-side at the
+    // authorize-redirect step (`DbOAuthClientProvider.state()`), compared
+    // against the upstream's echoed `state` at token exchange, and cleared
+    // on success (one-shot). NEVER returned to the frontend — the
+    // serializer strips it.
+    expected_state: text("expected_state"),
     created_at: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
