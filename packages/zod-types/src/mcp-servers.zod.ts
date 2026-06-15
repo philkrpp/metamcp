@@ -110,6 +110,112 @@ export const ForwardHeadersFormSchema = z
     { message: "validation:forwardHeaders.invalidHeaderName" },
   );
 
+// Supported token_endpoint_auth_method values exposed in the UI for
+// pre-registered upstream OAuth clients. The MCP SDK accepts any string,
+// but we constrain the UI to the three values commonly required by
+// enterprise SaaS providers that do not implement RFC 7591.
+export const OAuthClientAuthMethodEnum = z.enum([
+  "none",
+  "client_secret_basic",
+  "client_secret_post",
+]);
+
+// Optional pre-registered upstream OAuth client. Used to unblock providers
+// (Salesforce, Zendesk, ServiceNow, Microsoft Graph, ...) that require the
+// caller to register a client out-of-band instead of supporting RFC 7591
+// Dynamic Client Registration.
+//
+// When `client_id` is provided, the backend will populate
+// `oauth_sessions.client_information` for the MCP server so the SDK skips
+// dynamic registration and goes straight to the authorization-code-with-PKCE
+// flow against the provider's authorization endpoint.
+const oauthClientInfoBaseSchema = z.object({
+  client_id: z.string().optional(),
+  client_secret: z.string().optional(),
+  authorization_endpoint: z.string().optional(),
+  token_endpoint: z.string().optional(),
+  scope: z.string().optional(),
+  token_endpoint_auth_method: OAuthClientAuthMethodEnum.optional(),
+});
+
+const isEmptyString = (value: string | undefined) =>
+  value === undefined || value.trim() === "";
+
+const oauthClientInfoIsBlank = (
+  data: z.infer<typeof oauthClientInfoBaseSchema> | undefined,
+) =>
+  !data ||
+  (isEmptyString(data.client_id) &&
+    isEmptyString(data.client_secret) &&
+    isEmptyString(data.authorization_endpoint) &&
+    isEmptyString(data.token_endpoint) &&
+    isEmptyString(data.scope) &&
+    (data.token_endpoint_auth_method === undefined ||
+      data.token_endpoint_auth_method === "none"));
+
+const isValidOptionalUrl = (value: string | undefined) => {
+  if (isEmptyString(value)) return true;
+  try {
+    new URL(value as string);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+// Validation rules applied to the request schemas: if ANY field in the
+// section is populated, client_id becomes required; URL fields must parse.
+export const OAuthClientInfoRequestSchema = oauthClientInfoBaseSchema
+  .refine(
+    (data) =>
+      oauthClientInfoIsBlank(data) || !isEmptyString(data.client_id),
+    {
+      message:
+        "client_id is required when any pre-registered OAuth field is set",
+      path: ["client_id"],
+    },
+  )
+  .refine((data) => isValidOptionalUrl(data.authorization_endpoint), {
+    message: "authorization_endpoint must be a valid URL",
+    path: ["authorization_endpoint"],
+  })
+  .refine((data) => isValidOptionalUrl(data.token_endpoint), {
+    message: "token_endpoint must be a valid URL",
+    path: ["token_endpoint"],
+  });
+
+export type OAuthClientInfoRequest = z.infer<typeof OAuthClientInfoRequestSchema>;
+export type OAuthClientAuthMethod = z.infer<typeof OAuthClientAuthMethodEnum>;
+
+// Form-level shape for the Advanced OAuth section. Fields are plain optional
+// strings here so that empty inputs from the form do not trigger zod errors;
+// presence-based validation (client_id required when any field is set) is
+// applied via .refine() on the parent form schema.
+const oauthClientInfoFormShape = {
+  oauth_client_id: z.string().optional(),
+  oauth_client_secret: z.string().optional(),
+  oauth_authorization_endpoint: z.string().optional(),
+  oauth_token_endpoint: z.string().optional(),
+  oauth_scope: z.string().optional(),
+  oauth_token_endpoint_auth_method: OAuthClientAuthMethodEnum.optional(),
+} as const;
+
+const formOauthIsBlank = (data: {
+  oauth_client_id?: string;
+  oauth_client_secret?: string;
+  oauth_authorization_endpoint?: string;
+  oauth_token_endpoint?: string;
+  oauth_scope?: string;
+  oauth_token_endpoint_auth_method?: OAuthClientAuthMethod;
+}) =>
+  isEmptyString(data.oauth_client_id) &&
+  isEmptyString(data.oauth_client_secret) &&
+  isEmptyString(data.oauth_authorization_endpoint) &&
+  isEmptyString(data.oauth_token_endpoint) &&
+  isEmptyString(data.oauth_scope) &&
+  (data.oauth_token_endpoint_auth_method === undefined ||
+    data.oauth_token_endpoint_auth_method === "none");
+
 // Define the form schema (includes UI-specific fields)
 export const createServerFormSchema = z
   .object({
@@ -131,6 +237,7 @@ export const createServerFormSchema = z
     forward_headers: ForwardHeadersFormSchema,
     env: z.string().optional(),
     user_id: z.string().nullable().optional(),
+    ...oauthClientInfoFormShape,
   })
   .refine(
     (data) => {
@@ -169,7 +276,22 @@ export const createServerFormSchema = z
       message: "validation:url.required",
       path: ["url"],
     },
-  );
+  )
+  .refine(
+    (data) => formOauthIsBlank(data) || !isEmptyString(data.oauth_client_id),
+    {
+      message: "validation:oauthClientId.required",
+      path: ["oauth_client_id"],
+    },
+  )
+  .refine((data) => isValidOptionalUrl(data.oauth_authorization_endpoint), {
+    message: "validation:oauthAuthorizationEndpoint.invalid",
+    path: ["oauth_authorization_endpoint"],
+  })
+  .refine((data) => isValidOptionalUrl(data.oauth_token_endpoint), {
+    message: "validation:oauthTokenEndpoint.invalid",
+    path: ["oauth_token_endpoint"],
+  });
 
 export type CreateServerFormData = z.infer<typeof createServerFormSchema>;
 
@@ -194,6 +316,7 @@ export const EditServerFormSchema = z
     forward_headers: ForwardHeadersFormSchema,
     env: z.string().optional(),
     user_id: z.string().nullable().optional(),
+    ...oauthClientInfoFormShape,
   })
   .refine(
     (data) => {
@@ -232,7 +355,22 @@ export const EditServerFormSchema = z
       message: "validation:url.required",
       path: ["url"],
     },
-  );
+  )
+  .refine(
+    (data) => formOauthIsBlank(data) || !isEmptyString(data.oauth_client_id),
+    {
+      message: "validation:oauthClientId.required",
+      path: ["oauth_client_id"],
+    },
+  )
+  .refine((data) => isValidOptionalUrl(data.oauth_authorization_endpoint), {
+    message: "validation:oauthAuthorizationEndpoint.invalid",
+    path: ["oauth_authorization_endpoint"],
+  })
+  .refine((data) => isValidOptionalUrl(data.oauth_token_endpoint), {
+    message: "validation:oauthTokenEndpoint.invalid",
+    path: ["oauth_token_endpoint"],
+  });
 
 export type EditServerFormData = z.infer<typeof EditServerFormSchema>;
 
@@ -259,6 +397,7 @@ export const CreateMcpServerRequestSchema = z
     headers: z.record(z.string()).optional(),
     forward_headers: ForwardHeadersRecordSchema,
     user_id: z.string().nullable().optional(),
+    oauth_client_info: OAuthClientInfoRequestSchema.optional(),
   })
   .refine(
     (data) => {
@@ -444,6 +583,7 @@ export const UpdateMcpServerRequestSchema = z
     headers: z.record(z.string()).optional(),
     forward_headers: ForwardHeadersRecordSchema,
     user_id: z.string().nullable().optional(),
+    oauth_client_info: OAuthClientInfoRequestSchema.optional(),
   })
   .refine(
     (data) => {

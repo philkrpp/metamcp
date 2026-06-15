@@ -1,9 +1,9 @@
 import { OAuthClientInformation } from "@modelcontextprotocol/sdk/shared/auth.js";
-import { OAuthTokens } from "@modelcontextprotocol/sdk/shared/auth.js";
 import {
   McpServerErrorStatusEnum,
   McpServerStatusEnum,
   McpServerTypeEnum,
+  UpstreamTokenResponse,
 } from "@repo/zod-types";
 import { sql } from "drizzle-orm";
 import {
@@ -102,7 +102,12 @@ export const oauthSessionsTable = pgTable(
       .$type<OAuthClientInformation>()
       .notNull()
       .default(sql`'{}'::jsonb`),
-    tokens: jsonb("tokens").$type<OAuthTokens>(),
+    // Typed as UpstreamTokenResponse (RFC 6749 + .passthrough()) rather
+    // than the MCP SDK's narrow OAuthTokens so providers' extra response
+    // fields (Salesforce `instance_url`, OIDC `id_token`, Microsoft
+    // `ext_expires_in`, ...) round-trip without `as unknown as` casts at
+    // the call sites.
+    tokens: jsonb("tokens").$type<UpstreamTokenResponse>(),
     code_verifier: text("code_verifier"),
     created_at: timestamp("created_at", { withTimezone: true })
       .notNull()

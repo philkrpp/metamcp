@@ -11,6 +11,7 @@ import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 
+import { AdvancedOAuthSection } from "@/components/advanced-oauth-section";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -61,6 +62,12 @@ export default function McpServersPage() {
       headers: "",
       forward_headers: "",
       user_id: undefined, // Default to private (current user)
+      oauth_client_id: "",
+      oauth_client_secret: "",
+      oauth_authorization_endpoint: "",
+      oauth_token_endpoint: "",
+      oauth_scope: "",
+      oauth_token_endpoint_auth_method: "none",
     },
   });
 
@@ -150,6 +157,25 @@ export default function McpServersPage() {
       }
     }
 
+    // Only attach the pre-registered OAuth payload for HTTP-style servers,
+    // and only when the user actually filled in client_id.
+    const isHttpServer =
+      data.type === McpServerTypeEnum.Enum.SSE ||
+      data.type === McpServerTypeEnum.Enum.STREAMABLE_HTTP;
+    const oauthClientInfo =
+      isHttpServer && data.oauth_client_id && data.oauth_client_id.trim() !== ""
+        ? {
+            client_id: data.oauth_client_id.trim(),
+            client_secret: data.oauth_client_secret || undefined,
+            authorization_endpoint:
+              data.oauth_authorization_endpoint || undefined,
+            token_endpoint: data.oauth_token_endpoint || undefined,
+            scope: data.oauth_scope || undefined,
+            token_endpoint_auth_method:
+              data.oauth_token_endpoint_auth_method || "none",
+          }
+        : undefined;
+
     const request: CreateMcpServerRequest = {
       name: data.name,
       description: data.description,
@@ -162,6 +188,7 @@ export default function McpServersPage() {
       headers: headersObject,
       forward_headers: forwardHeadersRecord,
       user_id: data.user_id,
+      oauth_client_info: oauthClientInfo,
     };
 
     createMutation.mutate(request);
@@ -190,7 +217,7 @@ export default function McpServersPage() {
                 {t("mcp-servers:addServer")}
               </Button>
             </DialogTrigger>
-            <DialogContent className="sm:max-w-[500px]">
+            <DialogContent className="sm:max-w-[500px] max-h-[90vh] overflow-y-auto">
               <DialogHeader>
                 <DialogTitle>{t("mcp-servers:addServer")}</DialogTitle>
                 <DialogDescription>
@@ -492,6 +519,15 @@ export default function McpServersPage() {
                             <FormMessage />
                           </FormItem>
                         )}
+                      />
+
+                      <AdvancedOAuthSection
+                        form={
+                          form as unknown as Parameters<
+                            typeof AdvancedOAuthSection
+                          >[0]["form"]
+                        }
+                        idPrefix="create"
                       />
                     </>
                   )}

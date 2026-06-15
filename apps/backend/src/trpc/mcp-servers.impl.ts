@@ -17,6 +17,7 @@ import logger from "@/utils/logger";
 import {
   mcpServersRepository,
   namespaceMappingsRepository,
+  oauthSessionsRepository,
 } from "../db/repositories";
 import { McpServersSerializer } from "../db/serializers";
 import { mcpServerPool } from "../lib/metamcp/mcp-server-pool";
@@ -24,6 +25,7 @@ import { clearOverrideCache } from "../lib/metamcp/metamcp-middleware/tool-overr
 import { metaMcpServerPool } from "../lib/metamcp/metamcp-server-pool";
 import { serverErrorTracker } from "../lib/metamcp/server-error-tracker";
 import { convertDbServerToParams } from "../lib/metamcp/utils";
+import { persistPreRegisteredOAuthClient } from "./pre-registered-oauth";
 
 export const mcpServersImplementations = {
   create: async (
@@ -35,8 +37,10 @@ export const mcpServersImplementations = {
       const effectiveUserId =
         input.user_id !== undefined ? input.user_id : userId;
 
+      const { oauth_client_info: oauthClientInfo, ...serverInput } = input;
+
       const createdServer = await mcpServersRepository.create({
-        ...input,
+        ...serverInput,
         user_id: effectiveUserId,
       });
 
@@ -45,6 +49,31 @@ export const mcpServersImplementations = {
           success: false as const,
           message: "Failed to create MCP server",
         };
+      }
+
+      // Persist pre-registered upstream OAuth client when provided. Failure
+      // here should not roll back the server creation, but it is surfaced as
+      // an error response so the caller can retry.
+      if (oauthClientInfo) {
+        try {
+          await persistPreRegisteredOAuthClient(
+            createdServer.uuid,
+            oauthClientInfo,
+            oauthSessionsRepository,
+          );
+        } catch (error) {
+          logger.error(
+            `Error persisting pre-registered OAuth client for server ${createdServer.uuid}:`,
+            error,
+          );
+          return {
+            success: false as const,
+            message:
+              error instanceof Error
+                ? `Server created but OAuth client persistence failed: ${error.message}`
+                : "Server created but OAuth client persistence failed",
+          };
+        }
       }
 
       // Ensure idle session for the newly created server (async)
@@ -363,8 +392,10 @@ export const mcpServersImplementations = {
       const effectiveUserId =
         input.user_id !== undefined ? input.user_id : server.user_id;
 
+      const { oauth_client_info: oauthClientInfo, ...serverInput } = input;
+
       const updatedServer = await mcpServersRepository.update({
-        ...input,
+        ...serverInput,
         user_id: effectiveUserId,
       });
 
@@ -373,6 +404,28 @@ export const mcpServersImplementations = {
           success: false as const,
           message: "MCP server not found",
         };
+      }
+
+      if (oauthClientInfo) {
+        try {
+          await persistPreRegisteredOAuthClient(
+            updatedServer.uuid,
+            oauthClientInfo,
+            oauthSessionsRepository,
+          );
+        } catch (error) {
+          logger.error(
+            `Error persisting pre-registered OAuth client for server ${updatedServer.uuid}:`,
+            error,
+          );
+          return {
+            success: false as const,
+            message:
+              error instanceof Error
+                ? `Server updated but OAuth client persistence failed: ${error.message}`
+                : "Server updated but OAuth client persistence failed",
+          };
+        }
       }
 
       // Reset error status for stdio servers when they are updated
