@@ -51,7 +51,8 @@ export class McpServerPool {
   private healthCheckTimer: NodeJS.Timeout | null = null;
 
   // Background idle sessions by namespace: namespaceUuid -> any
-  private backgroundIdleSessionsByNamespace: Map<string, any> = new Map();
+  private backgroundIdleSessionsByNamespace: Map<string, Map<string, unknown>> =
+    new Map();
 
   // Default number of idle sessions per server UUID
   private readonly defaultIdleCount: number;
@@ -357,7 +358,10 @@ export class McpServerPool {
       const newClient = await this.createNewConnection(params, namespaceUuid);
       if (newClient) {
         const currentGeneration = this.idleSessionGenerations[serverUuid] ?? 0;
-        if (!this.idleSessions[serverUuid] && currentGeneration === generation) {
+        if (
+          !this.idleSessions[serverUuid] &&
+          currentGeneration === generation
+        ) {
           this.idleSessions[serverUuid] = newClient;
           logger.info(`Created idle session for server ${serverUuid}`);
           metamcpLogStore.addLog(
@@ -417,7 +421,11 @@ export class McpServerPool {
     this.createNewConnection(params, namespaceUuid)
       .then((newClient) => {
         const currentGeneration = this.idleSessionGenerations[serverUuid] ?? 0;
-        if (newClient && !this.idleSessions[serverUuid] && currentGeneration === generation) {
+        if (
+          newClient &&
+          !this.idleSessions[serverUuid] &&
+          currentGeneration === generation
+        ) {
           this.idleSessions[serverUuid] = newClient;
           logger.info(
             `Created background idle session for server [${params.name}] ${serverUuid}`,
@@ -595,8 +603,7 @@ export class McpServerPool {
     // Calculate per-server breakdown
     const perServerCounts: Record<string, number> = {};
     for (const serverUuid of Object.keys(this.serverParamsCache)) {
-      perServerCounts[serverUuid] =
-        this.countConnectionsForServer(serverUuid);
+      perServerCounts[serverUuid] = this.countConnectionsForServer(serverUuid);
     }
 
     return {
@@ -656,7 +663,7 @@ export class McpServerPool {
   /**
    * Get background idle sessions by namespace
    */
-  getBackgroundIdleSessionsByNamespace(): Map<string, any> {
+  getBackgroundIdleSessionsByNamespace(): Map<string, Map<string, unknown>> {
     return this.backgroundIdleSessionsByNamespace;
   }
 
@@ -665,7 +672,7 @@ export class McpServerPool {
    */
   setBackgroundIdleSessionsByNamespace(
     namespaceUuid: string,
-    options: any,
+    options: Map<string, unknown>,
   ): void {
     this.backgroundIdleSessionsByNamespace.set(namespaceUuid, options);
   }
@@ -1033,12 +1040,9 @@ export class McpServerPool {
    */
   private startHealthCheckTimer(): void {
     // Check idle session health every 60 seconds
-    this.healthCheckTimer = setInterval(
-      async () => {
-        await this.checkIdleSessionHealth();
-      },
-      60 * 1000,
-    ); // 60 seconds
+    this.healthCheckTimer = setInterval(async () => {
+      await this.checkIdleSessionHealth();
+    }, 60 * 1000); // 60 seconds
   }
 
   /**
@@ -1090,9 +1094,8 @@ export class McpServerPool {
         !this.idleSessions[serverUuid] &&
         !this.creatingIdleSessions.has(serverUuid)
       ) {
-        const isError = await serverErrorTracker.isServerInErrorState(
-          serverUuid,
-        );
+        const isError =
+          await serverErrorTracker.isServerInErrorState(serverUuid);
         if (!isError) {
           // Not in error and no idle session - try to create one
           this.createIdleSessionAsync(serverUuid, params);

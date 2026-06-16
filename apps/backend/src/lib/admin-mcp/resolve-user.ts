@@ -1,7 +1,6 @@
 import { db } from "../../db/index";
-import { usersTable } from "../../db/schema";
-
 import { ApiKeysRepository } from "../../db/repositories/api-keys.repo";
+import { usersTable } from "../../db/schema";
 
 const apiKeysRepository = new ApiKeysRepository();
 

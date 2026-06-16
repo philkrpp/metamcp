@@ -41,7 +41,9 @@ describe("retry-post-auth — isPostAuthRetryableError", () => {
         new Error("Connection refused. Is the MCP server running?"),
       ),
     ).toBe(true);
-    expect(isPostAuthRetryableError(new Error("connect ECONNREFUSED 1.2.3.4:443"))).toBe(true);
+    expect(
+      isPostAuthRetryableError(new Error("connect ECONNREFUSED 1.2.3.4:443")),
+    ).toBe(true);
     const withCause = new Error("fetch failed");
     (withCause as unknown as { cause: { code: string } }).cause = {
       code: "ECONNREFUSED",

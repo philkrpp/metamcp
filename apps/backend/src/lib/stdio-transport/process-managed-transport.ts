@@ -263,11 +263,10 @@ export class ProcessManagedStdioTransport implements Transport {
   async close(): Promise<void> {
     this._isCleanup = true;
 
-    const pid = this._process?.pid ?? null;
+    const proc = this._process;
+    const pid = proc?.pid ?? null;
 
-    if (pid) {
-      const proc = this._process!;
-
+    if (pid && proc) {
       // Register the "close" listener BEFORE sending any signal so a fast-exiting
       // child cannot emit "close" in between and cause the promise to time out.
       const exitedPromise = new Promise<boolean>((resolve) => {

@@ -17,11 +17,7 @@ const REFRESH_TOKEN_EXPIRY = 7 * 24 * 3600; // 7 days
 /**
  * Issue a new access token + refresh token pair and store them.
  */
-async function issueTokenPair(
-  clientId: string,
-  userId: string,
-  scope: string,
-) {
+async function issueTokenPair(clientId: string, userId: string, scope: string) {
   const accessToken = generateSecureAccessToken();
   const refreshToken = generateSecureRefreshToken();
 
@@ -31,8 +27,7 @@ async function issueTokenPair(
     scope,
     expires_at: Date.now() + ACCESS_TOKEN_EXPIRY * 1000,
     refresh_token: refreshToken,
-    refresh_token_expires_at:
-      Date.now() + REFRESH_TOKEN_EXPIRY * 1000,
+    refresh_token_expires_at: Date.now() + REFRESH_TOKEN_EXPIRY * 1000,
   });
 
   return { accessToken, refreshToken };

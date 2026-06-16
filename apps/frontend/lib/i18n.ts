@@ -10,21 +10,24 @@ export const LOCALE_NAMES = {
   es: "Español",
 } as const;
 
+// Translation dictionaries are arbitrarily nested string trees loaded from JSON
+export type TranslationValue = string | { [key: string]: TranslationValue };
+
 // Type for translations
 export type Translations = {
-  common: Record<string, any>;
-  auth: Record<string, any>;
-  navigation: Record<string, any>;
-  "mcp-servers": Record<string, any>;
-  namespaces: Record<string, any>;
-  endpoints: Record<string, any>;
-  "api-keys": Record<string, any>;
-  settings: Record<string, any>;
-  search: Record<string, any>;
-  inspector: Record<string, any>;
-  logs: Record<string, any>;
-  "audit-logs": Record<string, any>;
-  validation: Record<string, any>;
+  common: Record<string, TranslationValue>;
+  auth: Record<string, TranslationValue>;
+  navigation: Record<string, TranslationValue>;
+  "mcp-servers": Record<string, TranslationValue>;
+  namespaces: Record<string, TranslationValue>;
+  endpoints: Record<string, TranslationValue>;
+  "api-keys": Record<string, TranslationValue>;
+  settings: Record<string, TranslationValue>;
+  search: Record<string, TranslationValue>;
+  inspector: Record<string, TranslationValue>;
+  logs: Record<string, TranslationValue>;
+  "audit-logs": Record<string, TranslationValue>;
+  validation: Record<string, TranslationValue>;
 };
 
 // Utility functions for working with localized paths
@@ -360,13 +363,13 @@ export function getTranslation(
   params?: Record<string, string | number>,
 ): string {
   const parts = key.split(":");
-  let value: any = dictionary;
+  let value: unknown = dictionary;
 
   // First, navigate to the correct namespace (before the colon)
   if (parts.length > 1) {
     const namespace = parts[0]!;
     if (value && typeof value === "object" && namespace in value) {
-      value = value[namespace];
+      value = (value as Record<string, unknown>)[namespace];
     } else {
       return key; // Return the key if namespace not found
     }
@@ -375,7 +378,7 @@ export function getTranslation(
     const nestedKeys = parts[1]!.split(".");
     for (const k of nestedKeys) {
       if (value && typeof value === "object" && k in value) {
-        value = value[k];
+        value = (value as Record<string, unknown>)[k];
       } else {
         return key; // Return the key if translation not found
       }
@@ -385,7 +388,7 @@ export function getTranslation(
     const keys = key.split(".");
     for (const k of keys) {
       if (value && typeof value === "object" && k in value) {
-        value = value[k];
+        value = (value as Record<string, unknown>)[k];
       } else {
         return key; // Return the key if translation not found
       }

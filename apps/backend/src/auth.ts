@@ -117,16 +117,12 @@ export const auth = betterAuth({
     expiresIn: (() => {
       const raw = process.env.BETTER_AUTH_SESSION_EXPIRES_IN_SECONDS;
       const parsed = raw ? Number.parseInt(raw, 10) : NaN;
-      return Number.isFinite(parsed) && parsed > 0
-        ? parsed
-        : 60 * 60 * 24 * 7; // 7 days (default)
+      return Number.isFinite(parsed) && parsed > 0 ? parsed : 60 * 60 * 24 * 7; // 7 days (default)
     })(),
     updateAge: (() => {
       const raw = process.env.BETTER_AUTH_SESSION_UPDATE_AGE_SECONDS;
       const parsed = raw ? Number.parseInt(raw, 10) : NaN;
-      return Number.isFinite(parsed) && parsed > 0
-        ? parsed
-        : 60 * 60 * 24; // 1 day (default — how often the session expiry is bumped on access)
+      return Number.isFinite(parsed) && parsed > 0 ? parsed : 60 * 60 * 24; // 1 day (default — how often the session expiry is bumped on access)
     })(),
   },
   user: {

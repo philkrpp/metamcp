@@ -3,8 +3,9 @@
 
 import { mcpServerPool } from "./metamcp/mcp-server-pool";
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- middleware context is an intentionally dynamic plugin payload
 type Context = Record<string, any>;
-type CallNext = (context: Context) => Promise<any>;
+type CallNext = (context: Context) => Promise<unknown>;
 
 export class RateLimitError extends Error {
   public code: number;
@@ -97,7 +98,7 @@ export class RateLimiting {
     this.limiters = new Map();
   }
 
-  async onRequest(context: Context, callNext: CallNext): Promise<any> {
+  async onRequest(context: Context, callNext: CallNext): Promise<unknown> {
     const { endpoint } = context.req;
     const { user_id, namespace_uuid } = endpoint;
     const backgroundIdleSessions =
@@ -153,7 +154,7 @@ export class SlidingWindowRateLimiting {
     this.limiters = new Map();
   }
 
-  async onRequest(context: Context, callNext: CallNext): Promise<any> {
+  async onRequest(context: Context, callNext: CallNext): Promise<unknown> {
     const { endpoint, socket, headers } = context.req;
     const { namespace_uuid } = endpoint;
     const clientMaxRate = endpoint.client_max_rate;

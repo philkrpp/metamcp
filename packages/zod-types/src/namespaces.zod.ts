@@ -306,6 +306,7 @@ export const DatabaseNamespaceServerSchema = z.object({
   created_at: z.date(),
   user_id: z.string().nullable(),
   status: McpServerStatusEnum,
+  error_status: McpServerErrorStatusEnum.optional(),
 });
 
 export const DatabaseNamespaceWithServersSchema =

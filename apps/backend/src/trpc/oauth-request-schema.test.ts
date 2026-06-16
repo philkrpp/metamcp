@@ -103,9 +103,8 @@ describe("OAuthClientInformationSchema", () => {
 // the OAuth flow silently in production.
 describe("SDK OAuthClientInformationSchema cross-cut", () => {
   it("accepts the shape that the backend writes to oauth_sessions.client_information", async () => {
-    const { OAuthClientInformationSchema: SdkSchema } = await import(
-      "@modelcontextprotocol/sdk/shared/auth.js"
-    );
+    const { OAuthClientInformationSchema: SdkSchema } =
+      await import("@modelcontextprotocol/sdk/shared/auth.js");
 
     // Minimum shape MetaMCP persists for a pre-registered client.
     const persisted = {

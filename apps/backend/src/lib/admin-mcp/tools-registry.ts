@@ -1,3 +1,4 @@
+import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
 import {
   BulkImportMcpServersRequestSchema,
   CreateApiKeyRequestSchema,
@@ -33,9 +34,6 @@ import { mcpServersImplementations } from "../../trpc/mcp-servers.impl";
 import { namespacesImplementations } from "../../trpc/namespaces.impl";
 import { oauthImplementations } from "../../trpc/oauth.impl";
 import { toolsImplementations } from "../../trpc/tools.impl";
-
-import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
-
 import { createToolName } from "../metamcp/tool-name-parser";
 import { zodToMcpInputSchema } from "./zod-to-mcp-schema";
 

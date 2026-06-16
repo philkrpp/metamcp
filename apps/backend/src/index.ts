@@ -120,9 +120,8 @@ const gracefulShutdown = async (signal: string) => {
   console.log(`${signal} received, cleaning up MCP server pools...`);
   try {
     const { mcpServerPool } = await import("./lib/metamcp");
-    const { metaMcpServerPool } = await import(
-      "./lib/metamcp/metamcp-server-pool"
-    );
+    const { metaMcpServerPool } =
+      await import("./lib/metamcp/metamcp-server-pool");
     await Promise.allSettled([
       mcpServerPool.cleanupAll(),
       metaMcpServerPool.cleanupAll(),
@@ -131,6 +130,7 @@ const gracefulShutdown = async (signal: string) => {
   } catch (error) {
     console.error("Error during graceful shutdown:", error);
   }
+  // eslint-disable-next-line no-process-exit -- intentional: terminate the process after async cleanup in the shutdown signal handler
   process.exit(0);
 };
 

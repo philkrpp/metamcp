@@ -2,7 +2,10 @@ import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 
 import logger from "@/utils/logger";
 
-import { clearAdminToolsContext, setAdminToolsContext } from "../admin-mcp/admin-session-context";
+import {
+  clearAdminToolsContext,
+  setAdminToolsContext,
+} from "../admin-mcp/admin-session-context";
 import { configService } from "../config.service";
 import { getMcpServers } from "./fetch-metamcp";
 import { anyServerRequiresForwardedHeaders } from "./header-forwarding";
@@ -104,7 +107,10 @@ export class MetaMcpServerPool {
       if (cached && Date.now() < cached.expiresAt) {
         needsFreshServer = cached.needsFresh;
       } else {
-        const serverParams = await getMcpServers(namespaceUuid, includeInactiveServers);
+        const serverParams = await getMcpServers(
+          namespaceUuid,
+          includeInactiveServers,
+        );
         needsFreshServer = anyServerRequiresForwardedHeaders(serverParams);
         this.needsFreshServerCache[namespaceUuid] = {
           needsFresh: needsFreshServer,

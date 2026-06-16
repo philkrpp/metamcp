@@ -348,9 +348,7 @@ describe("serverRequiresForwardedHeaders", () => {
       ),
     ).toBe(false);
     expect(
-      serverRequiresForwardedHeaders(
-        makeServer({ uuid: "s1", name: "test" }),
-      ),
+      serverRequiresForwardedHeaders(makeServer({ uuid: "s1", name: "test" })),
     ).toBe(false);
   });
 });
@@ -427,9 +425,9 @@ describe("extractClientHeaders", () => {
 
 describe("ForwardHeadersRecordSchema - deny-list validation", () => {
   it("should reject forbidden headers at schema level", () => {
-    expect(
-      ForwardHeadersRecordSchema.safeParse({ Host: "Host" }).success,
-    ).toBe(false);
+    expect(ForwardHeadersRecordSchema.safeParse({ Host: "Host" }).success).toBe(
+      false,
+    );
     expect(
       ForwardHeadersRecordSchema.safeParse({ Cookie: "Cookie" }).success,
     ).toBe(false);

@@ -22,18 +22,17 @@ import {
   ResourceTemplate,
   Tool,
 } from "@modelcontextprotocol/sdk/types.js";
-import { z } from "zod";
 
 import logger from "@/utils/logger";
 
 import { namespacesRepository } from "../../db/repositories/namespaces.repo";
+import { toolsImplementations } from "../../trpc/tools.impl";
 import { getAdminToolsContext } from "../admin-mcp/admin-session-context";
 import {
   executeAdminTool,
   getAdminToolsForMcp,
   isExposedAdminToolName,
 } from "../admin-mcp/tools-registry";
-import { toolsImplementations } from "../../trpc/tools.impl";
 import { configService } from "../config.service";
 import { ConnectedClient } from "./client";
 import { getMcpServers } from "./fetch-metamcp";
@@ -311,17 +310,16 @@ export const createServer = async (
             let hasMore = true;
 
             while (hasMore) {
-              const result: ListToolsResult =
-                await active.client.request(
-                  {
-                    method: "tools/list",
-                    params: {
-                      cursor: cursor,
-                      _meta: request.params?._meta,
-                    },
+              const result: ListToolsResult = await active.client.request(
+                {
+                  method: "tools/list",
+                  params: {
+                    cursor: cursor,
+                    _meta: request.params?._meta,
                   },
-                  ListToolsResultSchema,
-                );
+                },
+                ListToolsResultSchema,
+              );
 
               if (result.tools && result.tools.length > 0) {
                 pages.push(...result.tools);
@@ -437,10 +435,7 @@ export const createServer = async (
   };
 
   // Original Call Tool Handler
-  const originalCallToolHandler: CallToolHandler = async (
-    request,
-    context,
-  ) => {
+  const originalCallToolHandler: CallToolHandler = async (request, context) => {
     const { name, arguments: args } = request.params;
 
     // Parse the tool name using shared utility
@@ -505,14 +500,13 @@ export const createServer = async (
                 let hasMore = true;
 
                 while (hasMore && !foundTool) {
-                  const result: ListToolsResult =
-                    await session.client.request(
-                      {
-                        method: "tools/list",
-                        params: { cursor: cursor },
-                      },
-                      ListToolsResultSchema,
-                    );
+                  const result: ListToolsResult = await session.client.request(
+                    {
+                      method: "tools/list",
+                      params: { cursor: cursor },
+                    },
+                    ListToolsResultSchema,
+                  );
 
                   if (
                     result.tools?.some(
@@ -753,7 +747,10 @@ export const createServer = async (
 
     // Extract forwarded headers from client request for servers that need them
     const forwardedHeadersByServer = handlerContext.clientRequestHeaders
-      ? extractForwardedHeaders(handlerContext.clientRequestHeaders, serverParams)
+      ? extractForwardedHeaders(
+          handlerContext.clientRequestHeaders,
+          serverParams,
+        )
       : {};
 
     // Track visited servers to detect circular references - reset on each call
@@ -893,13 +890,15 @@ export const createServer = async (
       namespaceUuid,
       includeInactiveServers,
     );
-    const allResources: ListResourcesResult["resources"] =
-      [];
+    const allResources: ListResourcesResult["resources"] = [];
     const failedServers: string[] = [];
 
     // Extract forwarded headers from client request for servers that need them
     const forwardedHeadersByServer = handlerContext.clientRequestHeaders
-      ? extractForwardedHeaders(handlerContext.clientRequestHeaders, serverParams)
+      ? extractForwardedHeaders(
+          handlerContext.clientRequestHeaders,
+          serverParams,
+        )
       : {};
 
     // Track visited servers to detect circular references - reset on each call
@@ -1079,7 +1078,10 @@ export const createServer = async (
       // Filter out self-referencing servers before processing
       // Extract forwarded headers from client request for servers that need them
       const forwardedHeadersByServer = handlerContext.clientRequestHeaders
-        ? extractForwardedHeaders(handlerContext.clientRequestHeaders, serverParams)
+        ? extractForwardedHeaders(
+            handlerContext.clientRequestHeaders,
+            serverParams,
+          )
         : {};
 
       const validTemplateServers = Object.entries(serverParams).filter(

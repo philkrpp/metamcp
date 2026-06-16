@@ -143,7 +143,7 @@ export async function recoverFromPostAuthRace<T>(
 
   let lastError: unknown = opts.initialError;
   for (let attempt = 0; attempt < backoff.length; attempt++) {
-    await sleep(backoff[attempt]!);
+    await sleep(backoff[attempt] ?? 0);
     try {
       const value = await op();
       return { kind: "succeeded", value };

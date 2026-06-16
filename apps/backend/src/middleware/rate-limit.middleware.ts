@@ -12,10 +12,13 @@ const slidingWindowRateLimit = new SlidingWindowRateLimiting();
 const tokenBucketRateLimit = new RateLimiting();
 
 // Periodic cleanup of stale rate limiter entries (every 30 minutes)
-setInterval(() => {
-  tokenBucketRateLimit.cleanup();
-  slidingWindowRateLimit.cleanup();
-}, 30 * 60 * 1000);
+setInterval(
+  () => {
+    tokenBucketRateLimit.cleanup();
+    slidingWindowRateLimit.cleanup();
+  },
+  30 * 60 * 1000,
+);
 
 interface RateLimitOptions extends express.Request {
   endpoint: DatabaseEndpoint;
