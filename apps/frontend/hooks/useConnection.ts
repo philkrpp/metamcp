@@ -292,15 +292,15 @@ export function useConnection({
   const is401Error = useMemoizedFn((error: unknown): boolean => {
     return Boolean(
       (error instanceof SseError && error.code === 401) ||
-        (error instanceof Error && error.message.includes("401")) ||
-        (error instanceof Error && error.message.includes("Unauthorized")) ||
-        // Handle fetch errors that might come from streamable HTTP
-        (error instanceof TypeError && error.message.includes("401")) ||
-        // Handle response errors
-        (error &&
-          typeof error === "object" &&
-          "status" in error &&
-          (error as { status: number }).status === 401),
+      (error instanceof Error && error.message.includes("401")) ||
+      (error instanceof Error && error.message.includes("Unauthorized")) ||
+      // Handle fetch errors that might come from streamable HTTP
+      (error instanceof TypeError && error.message.includes("401")) ||
+      // Handle response errors
+      (error &&
+        typeof error === "object" &&
+        "status" in error &&
+        (error as { status: number }).status === 401),
     );
   });
 
@@ -424,7 +424,7 @@ export function useConnection({
           };
         } else {
           switch (transportType) {
-            case McpServerTypeEnum.Enum.STDIO:
+            case McpServerTypeEnum.enum.STDIO:
               mcpProxyServerUrl = new URL(
                 `/mcp-proxy/server/stdio`,
                 getAppUrl(),
@@ -459,7 +459,7 @@ export function useConnection({
               };
               break;
 
-            case McpServerTypeEnum.Enum.SSE:
+            case McpServerTypeEnum.enum.SSE:
               mcpProxyServerUrl = new URL(`/mcp-proxy/server/sse`, getAppUrl());
               mcpProxyServerUrl.searchParams.append("url", url);
               transportOptions = {
@@ -488,7 +488,7 @@ export function useConnection({
               };
               break;
 
-            case McpServerTypeEnum.Enum.STREAMABLE_HTTP:
+            case McpServerTypeEnum.enum.STREAMABLE_HTTP:
               mcpProxyServerUrl = new URL(`/mcp-proxy/server/mcp`, getAppUrl());
               mcpProxyServerUrl.searchParams.append("url", url);
               transportOptions = {
@@ -558,7 +558,7 @@ export function useConnection({
         try {
           const transport = isMetaMCP
             ? new SSEClientTransport(mcpProxyServerUrl, transportOptions)
-            : transportType === McpServerTypeEnum.Enum.STREAMABLE_HTTP
+            : transportType === McpServerTypeEnum.enum.STREAMABLE_HTTP
               ? new StreamableHTTPClientTransport(mcpProxyServerUrl, {
                   sessionId: undefined,
                   ...transportOptions,
@@ -633,7 +633,7 @@ export function useConnection({
   const disconnect = useMemoizedFn(async () => {
     try {
       if (
-        transportType === McpServerTypeEnum.Enum.STREAMABLE_HTTP &&
+        transportType === McpServerTypeEnum.enum.STREAMABLE_HTTP &&
         clientTransport
       ) {
         await (

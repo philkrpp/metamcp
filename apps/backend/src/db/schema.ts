@@ -19,17 +19,24 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 
+// zod v4 types `ZodEnum.options` as a plain array, but drizzle's pgEnum requires
+// a non-empty tuple. Re-assert the shape while preserving the literal union so
+// the generated columns keep their narrow enum types.
+function toEnumTuple<T extends string>(options: readonly T[]): [T, ...T[]] {
+  return options as unknown as [T, ...T[]];
+}
+
 export const mcpServerTypeEnum = pgEnum(
   "mcp_server_type",
-  McpServerTypeEnum.options,
+  toEnumTuple(McpServerTypeEnum.options),
 );
 export const mcpServerStatusEnum = pgEnum(
   "mcp_server_status",
-  McpServerStatusEnum.options,
+  toEnumTuple(McpServerStatusEnum.options),
 );
 export const mcpServerErrorStatusEnum = pgEnum(
   "mcp_server_error_status",
-  McpServerErrorStatusEnum.options,
+  toEnumTuple(McpServerErrorStatusEnum.options),
 );
 export const mcpRequestAuditStatusEnum = pgEnum("mcp_request_audit_status", [
   "SUCCESS",
@@ -44,7 +51,7 @@ export const mcpServersTable = pgTable(
     description: text("description"),
     type: mcpServerTypeEnum("type")
       .notNull()
-      .default(McpServerTypeEnum.Enum.STDIO),
+      .default(McpServerTypeEnum.enum.STDIO),
     command: text("command"),
     args: text("args")
       .array()
@@ -57,7 +64,7 @@ export const mcpServersTable = pgTable(
     url: text("url"),
     error_status: mcpServerErrorStatusEnum("error_status")
       .notNull()
-      .default(McpServerErrorStatusEnum.Enum.NONE),
+      .default(McpServerErrorStatusEnum.enum.NONE),
     created_at: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -321,7 +328,7 @@ export const namespaceServerMappingsTable = pgTable(
       .references(() => mcpServersTable.uuid, { onDelete: "cascade" }),
     status: mcpServerStatusEnum("status")
       .notNull()
-      .default(McpServerStatusEnum.Enum.ACTIVE),
+      .default(McpServerStatusEnum.enum.ACTIVE),
     created_at: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -357,7 +364,7 @@ export const namespaceToolMappingsTable = pgTable(
       .references(() => mcpServersTable.uuid, { onDelete: "cascade" }),
     status: mcpServerStatusEnum("status")
       .notNull()
-      .default(McpServerStatusEnum.Enum.ACTIVE),
+      .default(McpServerStatusEnum.enum.ACTIVE),
     override_name: text("override_name"),
     override_title: text("override_title"),
     override_description: text("override_description"),

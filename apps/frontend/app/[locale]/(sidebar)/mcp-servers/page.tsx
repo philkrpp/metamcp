@@ -53,7 +53,7 @@ export default function McpServersPage() {
     defaultValues: {
       name: "",
       description: "",
-      type: McpServerTypeEnum.Enum.STDIO,
+      type: McpServerTypeEnum.enum.STDIO,
       command: "",
       args: "",
       env: "",
@@ -160,8 +160,8 @@ export default function McpServersPage() {
     // Only attach the pre-registered OAuth payload for HTTP-style servers,
     // and only when the user actually filled in client_id.
     const isHttpServer =
-      data.type === McpServerTypeEnum.Enum.SSE ||
-      data.type === McpServerTypeEnum.Enum.STREAMABLE_HTTP;
+      data.type === McpServerTypeEnum.enum.SSE ||
+      data.type === McpServerTypeEnum.enum.STREAMABLE_HTTP;
     const oauthClientInfo =
       isHttpServer && data.oauth_client_id && data.oauth_client_id.trim() !== ""
         ? {
@@ -280,12 +280,12 @@ export default function McpServersPage() {
                               variant="outline"
                               className="w-full justify-between"
                             >
-                              {field.value === McpServerTypeEnum.Enum.STDIO
+                              {field.value === McpServerTypeEnum.enum.STDIO
                                 ? t("mcp-servers:stdio")
-                                : field.value === McpServerTypeEnum.Enum.SSE
+                                : field.value === McpServerTypeEnum.enum.SSE
                                   ? t("mcp-servers:sse")
                                   : field.value ===
-                                      McpServerTypeEnum.Enum.STREAMABLE_HTTP
+                                      McpServerTypeEnum.enum.STREAMABLE_HTTP
                                     ? "Streamable HTTP"
                                     : t("mcp-servers:selectType")}
                               <ChevronDown className="ml-2 h-4 w-4" />
@@ -297,14 +297,14 @@ export default function McpServersPage() {
                           >
                             <DropdownMenuItem
                               onClick={() =>
-                                field.onChange(McpServerTypeEnum.Enum.STDIO)
+                                field.onChange(McpServerTypeEnum.enum.STDIO)
                               }
                             >
                               {t("mcp-servers:stdio")}
                             </DropdownMenuItem>
                             <DropdownMenuItem
                               onClick={() =>
-                                field.onChange(McpServerTypeEnum.Enum.SSE)
+                                field.onChange(McpServerTypeEnum.enum.SSE)
                               }
                             >
                               {t("mcp-servers:sse")}
@@ -312,7 +312,7 @@ export default function McpServersPage() {
                             <DropdownMenuItem
                               onClick={() =>
                                 field.onChange(
-                                  McpServerTypeEnum.Enum.STREAMABLE_HTTP,
+                                  McpServerTypeEnum.enum.STREAMABLE_HTTP,
                                 )
                               }
                             >
@@ -368,7 +368,7 @@ export default function McpServersPage() {
                   />
 
                   {/* STDIO specific fields */}
-                  {form.watch("type") === McpServerTypeEnum.Enum.STDIO && (
+                  {form.watch("type") === McpServerTypeEnum.enum.STDIO && (
                     <>
                       <FormField
                         control={form.control}
@@ -428,9 +428,9 @@ export default function McpServersPage() {
                   )}
 
                   {/* SSE and STREAMABLE_HTTP specific fields */}
-                  {(form.watch("type") === McpServerTypeEnum.Enum.SSE ||
+                  {(form.watch("type") === McpServerTypeEnum.enum.SSE ||
                     form.watch("type") ===
-                      McpServerTypeEnum.Enum.STREAMABLE_HTTP) && (
+                      McpServerTypeEnum.enum.STREAMABLE_HTTP) && (
                     <>
                       <FormField
                         control={form.control}

@@ -152,7 +152,7 @@ export function EditMcpServer({
     defaultValues: {
       name: "",
       description: "",
-      type: McpServerTypeEnum.Enum.STDIO,
+      type: McpServerTypeEnum.enum.STDIO,
       command: "",
       args: "",
       url: "",
@@ -184,7 +184,7 @@ export function EditMcpServer({
   useEffect(() => {
     const subscription = editForm.watch((value, { name }) => {
       if (name === "type" && value.type) {
-        if (value.type === McpServerTypeEnum.Enum.STDIO) {
+        if (value.type === McpServerTypeEnum.enum.STDIO) {
           // Clear URL, bearer token, headers, forward headers, and pre-registered
           // OAuth fields when switching to stdio
           editForm.setValue("url", "");
@@ -198,8 +198,8 @@ export function EditMcpServer({
           editForm.setValue("oauth_scope", "");
           editForm.setValue("oauth_token_endpoint_auth_method", "none");
         } else if (
-          value.type === McpServerTypeEnum.Enum.SSE ||
-          value.type === McpServerTypeEnum.Enum.STREAMABLE_HTTP
+          value.type === McpServerTypeEnum.enum.SSE ||
+          value.type === McpServerTypeEnum.enum.STREAMABLE_HTTP
         ) {
           // Clear command, args, and env when switching to sse or streamable_http
           editForm.setValue("command", "");
@@ -339,8 +339,8 @@ export function EditMcpServer({
       // `oauth_sessions.client_information` and potentially clobber an
       // SDK-populated row from a prior dynamic-registration flow.
       const isHttpServer =
-        data.type === McpServerTypeEnum.Enum.SSE ||
-        data.type === McpServerTypeEnum.Enum.STREAMABLE_HTTP;
+        data.type === McpServerTypeEnum.enum.SSE ||
+        data.type === McpServerTypeEnum.enum.STREAMABLE_HTTP;
       const dirty = editForm.formState.dirtyFields as Record<string, unknown>;
       const oauthSectionTouched = Boolean(
         dirty.oauth_client_id ||
@@ -484,12 +484,12 @@ export function EditMcpServer({
                   className="w-full justify-between"
                   type="button"
                 >
-                  {editForm.watch("type") === McpServerTypeEnum.Enum.STDIO
+                  {editForm.watch("type") === McpServerTypeEnum.enum.STDIO
                     ? t("mcp-servers:stdio")
-                    : editForm.watch("type") === McpServerTypeEnum.Enum.SSE
+                    : editForm.watch("type") === McpServerTypeEnum.enum.SSE
                       ? t("mcp-servers:sse")
                       : editForm.watch("type") ===
-                          McpServerTypeEnum.Enum.STREAMABLE_HTTP
+                          McpServerTypeEnum.enum.STREAMABLE_HTTP
                         ? "Streamable HTTP"
                         : t("mcp-servers:selectType")}
                   <ChevronDown className="h-4 w-4" />
@@ -498,14 +498,14 @@ export function EditMcpServer({
               <DropdownMenuContent className="w-[var(--radix-dropdown-menu-trigger-width)] min-w-[var(--radix-dropdown-menu-trigger-width)]">
                 <DropdownMenuItem
                   onClick={() =>
-                    editForm.setValue("type", McpServerTypeEnum.Enum.STDIO)
+                    editForm.setValue("type", McpServerTypeEnum.enum.STDIO)
                   }
                 >
                   {t("mcp-servers:stdio")}
                 </DropdownMenuItem>
                 <DropdownMenuItem
                   onClick={() =>
-                    editForm.setValue("type", McpServerTypeEnum.Enum.SSE)
+                    editForm.setValue("type", McpServerTypeEnum.enum.SSE)
                   }
                 >
                   {t("mcp-servers:sse")}
@@ -514,7 +514,7 @@ export function EditMcpServer({
                   onClick={() =>
                     editForm.setValue(
                       "type",
-                      McpServerTypeEnum.Enum.STREAMABLE_HTTP,
+                      McpServerTypeEnum.enum.STREAMABLE_HTTP,
                     )
                   }
                 >
@@ -524,7 +524,7 @@ export function EditMcpServer({
             </DropdownMenu>
           </div>
 
-          {editForm.watch("type") === McpServerTypeEnum.Enum.STDIO && (
+          {editForm.watch("type") === McpServerTypeEnum.enum.STDIO && (
             <>
               <div className="flex flex-col gap-2">
                 <label htmlFor="edit-command" className="text-sm font-medium">
@@ -573,9 +573,9 @@ export function EditMcpServer({
             </>
           )}
 
-          {(editForm.watch("type") === McpServerTypeEnum.Enum.SSE ||
+          {(editForm.watch("type") === McpServerTypeEnum.enum.SSE ||
             editForm.watch("type") ===
-              McpServerTypeEnum.Enum.STREAMABLE_HTTP) && (
+              McpServerTypeEnum.enum.STREAMABLE_HTTP) && (
             <>
               <div className="flex flex-col gap-2">
                 <label htmlFor="edit-url" className="text-sm font-medium">

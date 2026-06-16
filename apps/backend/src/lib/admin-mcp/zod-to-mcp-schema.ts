@@ -1,19 +1,17 @@
-import type { ZodTypeAny } from "zod";
-import { zodToJsonSchema } from "zod-to-json-schema";
+import { z, type ZodType } from "zod";
 
-export function zodToMcpInputSchema(schema: ZodTypeAny): Record<string, unknown> {
-  // zod-to-json-schema's return-type inference recurses too deeply on some zod
-  // 3.25 schemas (TS2589); the runtime result is unaffected, so call through a
-  // narrowed function signature to stop the deep instantiation.
-  const toJsonSchema = zodToJsonSchema as unknown as (
-    s: ZodTypeAny,
-    opts?: Record<string, unknown>,
-  ) => Record<string, unknown>;
-  const jsonSchema = toJsonSchema(schema, {
-    $refStrategy: "none",
-    target: "openApi3",
-  });
+export function zodToMcpInputSchema(schema: ZodType): Record<string, unknown> {
+  // zod v4 ships native JSON Schema conversion, replacing the external
+  // zod-to-json-schema package. Inline reused subschemas (no $ref/$defs) and
+  // tolerate unrepresentable nodes (e.g. z.any(), z.date()) so the MCP tool
+  // inputSchema stays a single self-contained object.
+  const jsonSchema = z.toJSONSchema(schema, {
+    target: "draft-7",
+    io: "input",
+    reused: "inline",
+    unrepresentable: "any",
+  }) as Record<string, unknown>;
 
-  const { $schema: _, ...rest } = jsonSchema as Record<string, unknown>;
+  const { $schema: _schema, ...rest } = jsonSchema;
   return rest;
 }
