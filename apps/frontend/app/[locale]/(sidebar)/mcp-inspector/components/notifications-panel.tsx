@@ -138,7 +138,9 @@ export function NotificationsPanel({
 
     // For other notifications, display the method and params
     const method = notification.notification.method;
-    const params = (notification.notification as { params?: unknown }).params;
+    const params = (
+      notification.notification as { params?: Record<string, unknown> }
+    ).params;
 
     return (
       <div className="space-y-1">
