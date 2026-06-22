@@ -207,9 +207,6 @@ export const connectMetaMcpClient = async (
         return undefined;
       }
 
-      const connectedClient = client;
-      const connectedTransport = transport;
-
       // Set up process crash detection for STDIO transports BEFORE connecting
       if (transport instanceof ProcessManagedStdioTransport) {
         logger.info(
