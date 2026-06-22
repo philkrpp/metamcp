@@ -94,11 +94,8 @@ export function ToolManagement({
       const allTools: MCPTool[] = [];
       let cursor: string | undefined = undefined;
       let hasMore = true;
-      let pageCount = 0;
 
       while (hasMore) {
-        pageCount++;
-
         const response = (await makeRequest(
           {
             method: "tools/list" as const,

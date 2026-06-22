@@ -8,9 +8,13 @@ import { ServerParameters } from "@repo/zod-types";
 import logger from "@/utils/logger";
 
 import { ProcessManagedStdioTransport } from "../stdio-transport/process-managed-transport";
+import { transformDockerEnv, transformDockerUrl } from "./docker-url";
 import { metamcpLogStore } from "./log-store";
 import { serverErrorTracker } from "./server-error-tracker";
 import { resolveEnvVariables } from "./utils";
+
+// Re-exported for backwards compatibility with existing importers.
+export { transformDockerUrl };
 
 const sleep = (time: number) =>
   new Promise<void>((resolve) => setTimeout(() => resolve(), time));
@@ -21,20 +25,6 @@ export interface ConnectedClient {
   onProcessCrash?: (exitCode: number | null, signal: string | null) => void;
 }
 
-/**
- * Transforms localhost URLs to use host.docker.internal when running inside Docker
- */
-export const transformDockerUrl = (url: string): string => {
-  if (process.env.TRANSFORM_LOCALHOST_TO_DOCKER_INTERNAL === "true") {
-    const transformed = url.replace(
-      /localhost|127\.0\.0\.1/g,
-      "host.docker.internal",
-    );
-    return transformed;
-  }
-  return url;
-};
-
 export const createMetaMcpClient = (
   serverParams: ServerParameters,
 ): { client: Client | undefined; transport: Transport | undefined } => {
@@ -43,9 +33,12 @@ export const createMetaMcpClient = (
   // Create the appropriate transport based on server type
   // Default to "STDIO" if type is undefined
   if (!serverParams.type || serverParams.type === "STDIO") {
-    // Resolve environment variable placeholders
+    // Resolve environment variable placeholders, then (when running inside
+    // Docker) rewrite localhost references in env values such as DB connection
+    // strings to host.docker.internal, mirroring the URL transform applied to
+    // SSE/STREAMABLE_HTTP servers.
     const resolvedEnv = serverParams.env
-      ? resolveEnvVariables(serverParams.env)
+      ? transformDockerEnv(resolveEnvVariables(serverParams.env))
       : undefined;
 
     const stdioParams: StdioServerParameters = {
@@ -201,6 +194,9 @@ export const connectMetaMcpClient = async (
         return undefined;
       }
 
+      const connectedClient = client;
+      const connectedTransport = transport;
+
       // Set up process crash detection for STDIO transports BEFORE connecting
       if (transport instanceof ProcessManagedStdioTransport) {
         logger.info(
@@ -230,8 +226,8 @@ export const connectMetaMcpClient = async (
       return {
         client,
         cleanup: async () => {
-          await transport!.close();
-          await client!.close();
+          await connectedTransport.close();
+          await connectedClient.close();
         },
         onProcessCrash: (exitCode, signal) => {
           logger.warn(
@@ -270,7 +266,7 @@ export const connectMetaMcpClient = async (
       if (client) {
         try {
           await client.close();
-        } catch (cleanupError) {
+        } catch {
           // Client may not be fully initialized, ignore
         }
       }

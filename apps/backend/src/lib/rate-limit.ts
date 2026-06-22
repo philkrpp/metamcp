@@ -1,11 +1,17 @@
 // rateLimiting.ts
 // Rate limiting for protecting MCP servers from abuse
 
+import type { DatabaseEndpoint } from "@repo/zod-types";
+import type { Request } from "express";
+
 import logger from "../utils/logger";
 import { mcpServerPool } from "./metamcp/mcp-server-pool";
 
-type Context = Record<string, any>;
-type CallNext = (context: Context) => Promise<any>;
+interface Context {
+  req: Request;
+}
+type CallNext = (context: Context) => Promise<unknown>;
+type EndpointRequest = Request & { endpoint: DatabaseEndpoint };
 
 export class RateLimitError extends Error {
   public code: number;
@@ -92,9 +98,10 @@ export class RateLimiting {
     this.limiters = new Map();
   }
 
-  async onRequest(context: Context, callNext: CallNext): Promise<any> {
-    const { endpoint } = context.req;
-    const { user_id, namespace_uuid } = endpoint;
+  async onRequest(context: Context, callNext: CallNext): Promise<unknown> {
+    const { endpoint } = context.req as EndpointRequest;
+    const namespace_uuid = endpoint.namespace_uuid;
+    const user_id = endpoint.user_id ?? "";
     const backgroundIdleSessions =
       mcpServerPool.getBackgroundIdleSessionsByNamespace();
     let limiter = this.limiters.get(namespace_uuid);
@@ -146,23 +153,26 @@ export class SlidingWindowRateLimiting {
     this.limiters = new Map();
   }
 
-  async onRequest(context: Context, callNext: CallNext): Promise<any> {
-    const { endpoint, socket, headers } = context.req;
+  async onRequest(context: Context, callNext: CallNext): Promise<unknown> {
+    const req = context.req as EndpointRequest;
+    const { endpoint, socket, headers } = req;
     const { namespace_uuid } = endpoint;
-    this.clientMaxRate = endpoint.client_max_rate;
-    this.clientMaxRateSeconds = endpoint.client_max_rate_seconds;
-    this.clientMaxRateStrategy =
-      endpoint.client_max_rate_strategy === ""
-        ? this.clientMaxRateStrategy
-        : endpoint.client_max_rate_strategy;
-    this.clientMaxRateStrategyKey =
-      endpoint.client_max_rate_strategy_key === ""
-        ? this.clientMaxRateStrategyKey
-        : endpoint.client_max_rate_strategy_key;
+    this.clientMaxRate = endpoint.client_max_rate ?? 0;
+    this.clientMaxRateSeconds = endpoint.client_max_rate_seconds ?? 0;
+    this.clientMaxRateStrategy = endpoint.client_max_rate_strategy
+      ? endpoint.client_max_rate_strategy
+      : this.clientMaxRateStrategy;
+    this.clientMaxRateStrategyKey = endpoint.client_max_rate_strategy_key
+      ? endpoint.client_max_rate_strategy_key
+      : this.clientMaxRateStrategyKey;
 
     const backgroundIdleSessions =
       mcpServerPool.getBackgroundIdleSessionsByNamespace();
-    const key = headers[this.clientMaxRateStrategyKey] || socket.remoteAddress;
+    const headerValue = headers[this.clientMaxRateStrategyKey];
+    const key =
+      (Array.isArray(headerValue) ? headerValue[0] : headerValue) ||
+      socket.remoteAddress ||
+      "";
 
     let limiter = this.limiters.get(key);
 
@@ -212,7 +222,7 @@ export class SlidingWindowRateLimiting {
     return callNext(context);
   }
 
-  async onResponse(context: Context, callNext: CallNext): Promise<any> {
+  async onResponse(context: Context, callNext: CallNext): Promise<unknown> {
     return callNext(context);
   }
 }
