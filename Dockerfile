@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 # Use the official uv image as base
 FROM ghcr.io/astral-sh/uv:debian AS base
 
@@ -29,8 +30,9 @@ COPY packages/trpc/package.json ./packages/trpc/
 COPY packages/typescript-config/package.json ./packages/typescript-config/
 COPY packages/zod-types/package.json ./packages/zod-types/
 
-# Install dependencies
-RUN pnpm install --frozen-lockfile
+# Install dependencies (pnpm store cached across builds so packages aren't re-downloaded)
+RUN --mount=type=cache,target=/pnpm/store \
+    pnpm install --frozen-lockfile --store-dir=/pnpm/store
 
 # Builder stage
 FROM base AS builder
@@ -45,8 +47,10 @@ COPY --from=deps /app/packages ./packages
 # Copy source code
 COPY . .
 
-# Build all packages and apps
-RUN pnpm build
+# Build all packages and apps (turbo cache persisted across builds so unchanged
+# packages are restored instead of rebuilt)
+RUN --mount=type=cache,target=/turbo \
+    TURBO_CACHE_DIR=/turbo pnpm build
 
 # Increase the Next.js dev/prod proxy timeout from 30s to 600s.
 # Resolve the next package dir via glob so this survives lockfile/peer-hash changes.
@@ -89,7 +93,9 @@ COPY --from=builder --chown=nextjs:nodejs /app/pnpm-workspace.yaml ./
 
 # Install production dependencies only (drizzle-kit is a prod dep, used for migrations)
 # CI=true so pnpm purges node_modules non-interactively (no TTY in Docker build)
-RUN CI=true pnpm install --prod --config.confirmModulesPurge=false
+# Shared pnpm store cache mount so packages aren't re-downloaded on every build.
+RUN --mount=type=cache,target=/pnpm/store \
+    CI=true pnpm install --prod --config.confirmModulesPurge=false --store-dir=/pnpm/store
 
 # Copy startup script
 COPY --chown=nextjs:nodejs docker-entrypoint.sh ./
