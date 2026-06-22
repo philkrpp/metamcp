@@ -87,12 +87,9 @@ COPY --from=builder --chown=nextjs:nodejs /app/node_modules ./node_modules
 COPY --from=builder --chown=nextjs:nodejs /app/package.json ./
 COPY --from=builder --chown=nextjs:nodejs /app/pnpm-workspace.yaml ./
 
-# Install production dependencies only
+# Install production dependencies only (drizzle-kit is a prod dep, used for migrations)
 # CI=true so pnpm purges node_modules non-interactively (no TTY in Docker build)
 RUN CI=true pnpm install --prod --config.confirmModulesPurge=false
-
-# Install drizzle-kit locally in backend for migrations
-RUN cd apps/backend && CI=true pnpm add drizzle-kit@0.31.1 --config.confirmModulesPurge=false
 
 # Copy startup script
 COPY --chown=nextjs:nodejs docker-entrypoint.sh ./
