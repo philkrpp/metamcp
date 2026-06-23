@@ -6,20 +6,20 @@ import { metaMcpServerPool } from "./metamcp";
 import { serverErrorTracker } from "./metamcp/server-error-tracker";
 import { convertDbServerToParams } from "./metamcp/utils";
 
+function parseBool(value: string | undefined, defaultValue: boolean): boolean {
+  if (value === undefined) return defaultValue;
+  const normalized = value.trim().toLowerCase();
+  if (["1", "true", "yes", "y", "on"].includes(normalized)) return true;
+  if (["0", "false", "no", "n", "off"].includes(normalized)) return false;
+  return defaultValue;
+}
+
 /**
  * Startup initialization that must happen before the HTTP server begins listening.
  *
  * IMPORTANT: This function does not prevent the app from starting unless BOOTSTRAP_FAIL_HARD=true.
  */
 export async function initializeOnStartup(): Promise<void> {
-  const parseBool = (value: string | undefined, defaultValue: boolean) => {
-    if (value === undefined) return defaultValue;
-    const normalized = value.trim().toLowerCase();
-    if (["1", "true", "yes", "y", "on"].includes(normalized)) return true;
-    if (["0", "false", "no", "n", "off"].includes(normalized)) return false;
-    return defaultValue;
-  };
-
   const enableEnvBootstrap = parseBool(process.env.BOOTSTRAP_ENABLE, true);
   const failHard = parseBool(process.env.BOOTSTRAP_FAIL_HARD, false);
 
@@ -45,11 +45,8 @@ export async function initializeOnStartup(): Promise<void> {
  */
 export async function initializeIdleServers() {
   try {
-    console.log(
-      "Initializing idle servers for all namespaces and all MCP servers...",
-    );
-
-    // Reset all ERROR statuses so servers get a fresh chance on restart
+    // Reset all ERROR statuses so servers get a fresh chance on restart.
+    // This is cheap (DB-only) and always runs, even when pre-warming is disabled.
     const resetCount = await mcpServersRepository.resetAllErrorStatuses();
     if (resetCount > 0) {
       console.log(
@@ -58,6 +55,22 @@ export async function initializeIdleServers() {
     }
     // Also clear in-memory crash attempt counters
     serverErrorTracker.resetAllAttempts();
+
+    // Eager pre-warming spawns one idle connection (a child process for STDIO
+    // servers) for EVERY configured server plus an idle MetaMCP instance per
+    // namespace — regardless of whether they are ever used. On large setups this
+    // dominates RAM usage. Disable with PREWARM_IDLE_SERVERS=false to connect
+    // lazily on first use instead. Defaults to true to preserve prior behavior.
+    if (!parseBool(process.env.PREWARM_IDLE_SERVERS, true)) {
+      console.log(
+        "Idle server pre-warming disabled via PREWARM_IDLE_SERVERS=false — connecting lazily on first use",
+      );
+      return;
+    }
+
+    console.log(
+      "Initializing idle servers for all namespaces and all MCP servers...",
+    );
 
     // Fetch all namespaces from the database
     const namespaces = await namespacesRepository.findAll();

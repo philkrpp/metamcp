@@ -39,6 +39,13 @@ export class McpServerPool {
   // Track ongoing idle session creation to prevent duplicates
   private creatingIdleSessions: Set<string> = new Set();
 
+  // In-flight ACTIVE connection creations per serverUuid. Incremented
+  // synchronously before the await in getSession()'s create path and released
+  // afterwards. Without this reservation the per-server and total caps are a
+  // check-then-act race: concurrent getSession() calls all pass the cap check
+  // during the async connect gap and the pool overshoots both limits.
+  private pendingActiveConnections: Record<string, number> = {};
+
   // Generation counter per server UUID: incremented by invalidateIdleSession() so
   // any in-flight createIdleSession / createIdleSessionAsync that resolves with a
   // stale generation knows to discard its result instead of storing it.
@@ -88,10 +95,18 @@ export class McpServerPool {
     if (!McpServerPool.instance) {
       const envMax = parseInt(process.env.MAX_TOTAL_CONNECTIONS || "", 10);
       const maxConn = Number.isFinite(envMax) && envMax > 0 ? envMax : 100;
+      const envPerServer = parseInt(
+        process.env.MAX_CONNECTIONS_PER_SERVER || "",
+        10,
+      );
+      const maxPerServer =
+        Number.isFinite(envPerServer) && envPerServer > 0
+          ? envPerServer
+          : maxConnectionsPerServer;
       McpServerPool.instance = new McpServerPool(
         defaultIdleCount,
         maxConn,
-        maxConnectionsPerServer,
+        maxPerServer,
       );
     }
     return McpServerPool.instance;
@@ -101,24 +116,32 @@ export class McpServerPool {
    * Count all connections (idle + active + pending) for a specific server UUID
    */
   private countConnectionsForServer(serverUuid: string): number {
-    let count = 0;
+    // Count DISTINCT ConnectedClient instances (= real backend processes/
+    // transports), not slot references. Reuse stores the same client in
+    // multiple sessions' slots; counting slots would inflate the number and
+    // make the cap fire spuriously (e.g. "12/5" with only 5 real connections).
+    const distinct = new Set<ConnectedClient>();
 
-    // Count idle session
     if (this.idleSessions[serverUuid]) {
-      count += 1;
+      distinct.add(this.idleSessions[serverUuid]);
     }
 
-    // Count active sessions across all sessionIds
     for (const sessionServers of Object.values(this.activeSessions)) {
-      if (sessionServers[serverUuid]) {
-        count += 1;
+      const client = sessionServers[serverUuid];
+      if (client) {
+        distinct.add(client);
       }
     }
+
+    let count = distinct.size;
 
     // Count pending idle creation
     if (this.creatingIdleSessions.has(serverUuid)) {
       count += 1;
     }
+
+    // Count in-flight active creations (reserved slots not yet stored)
+    count += this.pendingActiveConnections[serverUuid] ?? 0;
 
     return count;
   }
@@ -212,53 +235,80 @@ export class McpServerPool {
       }
     }
 
-    // No idle session available — check per-server cap before spawning
-    if (!this.canCreateConnectionForServer(serverUuid)) {
-      // At cap: reuse the oldest active connection instead of spawning
-      const reusable = this.findOldestActiveConnectionForServer(serverUuid);
-      if (reusable) {
-        logger.info(
-          `Reusing existing connection for server ${serverUuid} (at per-server cap ${this.maxConnectionsPerServer})`,
+    // No idle session available. Reserve an active slot BEFORE the await so
+    // concurrent getSession() calls for the same server can see this in-flight
+    // creation in the per-server and total counts. The increment is synchronous
+    // (no await precedes it), so it is atomic w.r.t. sibling calls — closing the
+    // check-then-act race that let the pool overshoot both caps.
+    this.pendingActiveConnections[serverUuid] =
+      (this.pendingActiveConnections[serverUuid] ?? 0) + 1;
+
+    try {
+      // Per-server cap. Strict ">" because our own reservation is now included
+      // in the count, so being exactly at the cap must still be allowed to create.
+      const projected = this.countConnectionsForServer(serverUuid);
+      if (projected > this.maxConnectionsPerServer) {
+        logger.warn(
+          `Per-server connection limit reached for ${serverUuid}: ${projected}/${this.maxConnectionsPerServer}`,
         );
-        this.activeSessions[sessionId][serverUuid] = reusable;
-        this.sessionToServers[sessionId].add(serverUuid);
-        return reusable;
+        // At cap: reuse the oldest active connection instead of spawning.
+        const reusable = this.findOldestActiveConnectionForServer(serverUuid);
+        if (reusable) {
+          logger.info(
+            `Reusing existing connection for server ${serverUuid} (at per-server cap ${this.maxConnectionsPerServer})`,
+          );
+          this.activeSessions[sessionId][serverUuid] = reusable;
+          this.sessionToServers[sessionId].add(serverUuid);
+          return reusable;
+        }
+        // No reusable connection exists yet (e.g. a cold-start burst where all
+        // siblings are still mid-connect). Fall through and create one rather
+        // than stranding the request; the global cap still bounds the total.
+      }
+
+      const newClient = await this.createNewConnection(params, namespaceUuid);
+      if (!newClient) {
+        return undefined;
+      }
+
+      // Re-check after the async gap: a concurrent getSession() call for the same
+      // (sessionId, serverUuid) pair may have stored a connection while we were awaiting
+      // createNewConnection(). If so, discard ours to avoid leaking the spawned process.
+      if (this.activeSessions[sessionId]?.[serverUuid]) {
+        newClient.cleanup().catch((error) => {
+          logger.error(
+            `Error cleaning up duplicate connection for server ${params.uuid}:`,
+            error,
+          );
+        });
+        return this.activeSessions[sessionId][serverUuid];
+      }
+
+      this.activeSessions[sessionId][serverUuid] = newClient;
+      this.sessionToServers[sessionId].add(serverUuid);
+
+      logger.info(
+        `Created new active session for server ${serverUuid}, session ${sessionId}`,
+      );
+
+      // Only pre-warm idle pool for servers that don't require forwarded headers.
+      // Idle sessions are created without per-client headers, so they can't be
+      // reused when per-client header forwarding is configured.
+      if (!serverRequiresForwardedHeaders(params)) {
+        this.createIdleSessionAsync(serverUuid, params, namespaceUuid);
+      }
+
+      return newClient;
+    } finally {
+      // Release the reservation: the connection (if created) is now tracked in
+      // activeSessions, or creation failed / was discarded as a duplicate.
+      const remaining = (this.pendingActiveConnections[serverUuid] ?? 1) - 1;
+      if (remaining > 0) {
+        this.pendingActiveConnections[serverUuid] = remaining;
+      } else {
+        delete this.pendingActiveConnections[serverUuid];
       }
     }
-
-    const newClient = await this.createNewConnection(params, namespaceUuid);
-    if (!newClient) {
-      return undefined;
-    }
-
-    // Re-check after the async gap: a concurrent getSession() call for the same
-    // (sessionId, serverUuid) pair may have stored a connection while we were awaiting
-    // createNewConnection(). If so, discard ours to avoid leaking the spawned process.
-    if (this.activeSessions[sessionId]?.[serverUuid]) {
-      newClient.cleanup().catch((error) => {
-        logger.error(
-          `Error cleaning up duplicate connection for server ${params.uuid}:`,
-          error,
-        );
-      });
-      return this.activeSessions[sessionId][serverUuid];
-    }
-
-    this.activeSessions[sessionId][serverUuid] = newClient;
-    this.sessionToServers[sessionId].add(serverUuid);
-
-    logger.info(
-      `Created new active session for server ${serverUuid}, session ${sessionId}`,
-    );
-
-    // Only pre-warm idle pool for servers that don't require forwarded headers.
-    // Idle sessions are created without per-client headers, so they can't be
-    // reused when per-client header forwarding is configured.
-    if (!serverRequiresForwardedHeaders(params)) {
-      this.createIdleSessionAsync(serverUuid, params, namespaceUuid);
-    }
-
-    return newClient;
   }
 
   /**
@@ -560,6 +610,7 @@ export class McpServerPool {
     this.sessionToServers = {};
     this.sessionTimestamps = {};
     this.serverParamsCache = {};
+    this.pendingActiveConnections = {};
 
     // Bump all known generations (never reset to {}) so any in-flight idle
     // creation that started before cleanupAll() resolves with a stale value
@@ -620,14 +671,27 @@ export class McpServerPool {
    * Get total connection count (idle + active + pending)
    */
   private getTotalConnectionCount(): number {
-    const idle = Object.keys(this.idleSessions).length;
-    const active = Object.keys(this.activeSessions).reduce(
-      (total, sessionId) =>
-        total + Object.keys(this.activeSessions[sessionId]).length,
+    // Count DISTINCT ConnectedClient instances across idle + all active slots.
+    // A connection reused across N sessions occupies N slots but is ONE real
+    // backend process; counting slots would falsely saturate the global cap
+    // and refuse legitimate (including recovery) connections.
+    const distinct = new Set<ConnectedClient>();
+
+    for (const client of Object.values(this.idleSessions)) {
+      distinct.add(client);
+    }
+    for (const sessionServers of Object.values(this.activeSessions)) {
+      for (const client of Object.values(sessionServers)) {
+        distinct.add(client);
+      }
+    }
+
+    const pendingIdle = this.creatingIdleSessions.size;
+    const pendingActive = Object.values(this.pendingActiveConnections).reduce(
+      (sum, n) => sum + n,
       0,
     );
-    const pending = this.creatingIdleSessions.size;
-    return idle + active + pending;
+    return distinct.size + pendingIdle + pendingActive;
   }
 
   /**

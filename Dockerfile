@@ -7,7 +7,7 @@ RUN apt-get update && apt-get install -y \
     curl \
     gnupg \
     && curl -fsSL https://deb.nodesource.com/setup_24.x | bash - \
-    && apt-get install -y nodejs \
+    && apt-get install -y nodejs=24.16.0-1nodesource1 \
     && npm install -g pnpm@10.34.1 \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*

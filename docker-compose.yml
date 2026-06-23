@@ -27,7 +27,25 @@ services:
       
       # Docker networking fix
       TRANSFORM_LOCALHOST_TO_DOCKER_INTERNAL: ${TRANSFORM_LOCALHOST_TO_DOCKER_INTERNAL:-true}
-      
+
+      # ========================================================================
+      # Memory / connection tuning (see example.env for details)
+      # ========================================================================
+      # Idle timeout for pooled MCP sessions in ms. null/unset = infinite (never
+      # reaped). 1800000 = 30 min so unused server connections (and their child
+      # processes) are released instead of accumulating.
+      SESSION_LIFETIME: ${SESSION_LIFETIME:-1800000}
+      # Hard ceiling on concurrent pooled MCP connections (= STDIO child
+      # processes). Code default is 100; 20 keeps idle RAM bounded.
+      MAX_TOTAL_CONNECTIONS: ${MAX_TOTAL_CONNECTIONS:-20}
+      # Per-server ceiling on concurrent backend connections (= distinct child
+      # processes per serverUuid). Beyond this, sessions reuse the oldest live
+      # connection instead of spawning more. Code default is 5.
+      MAX_CONNECTIONS_PER_SERVER: ${MAX_CONNECTIONS_PER_SERVER:-5}
+      # Eagerly spawn an idle connection for every server + namespace at startup.
+      # false = connect lazily on first use (much lower idle RAM).
+      PREWARM_IDLE_SERVERS: ${PREWARM_IDLE_SERVERS:-true}
+
       # ========================================================================
       # Bootstrap Configuration Examples
       # ========================================================================
