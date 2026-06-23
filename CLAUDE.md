@@ -78,3 +78,69 @@ metamcp-Server-Config:
 - Bricht ein Server, prüfen welche SDK-Range er deklariert
   (`npm view <pkg> dependencies`) und ob eine ältere SDK den strengen Check noch
   nicht hat (SDK-Quelle unter `dist/esm/server/mcp.js`).
+
+### Endpoint liefert leere Tool-Liste (`returning 0 tools`) trotz vieler Server
+
+**Symptom:** Ein Endpoint verbindet sich im MCP Inspector als **Connected**, aber
+`List Tools` zeigt 0 Tools — obwohl die gemappten MCP-Server jede Menge Tools haben.
+
+**Wichtig:** „Connected" im Inspector bezieht sich nur auf die **metamcp-Endpoint-Session**.
+Ob die *darunterliegenden* Backend-Server Tools liefern, ist davon unabhängig.
+
+**Diagnose — kein Raten nötig, die Logs sagen es exakt.** Im Backend-Log einer
+einzelnen `List Tools`-Anfrage:
+
+```
+[DEBUG-TOOLS] 🔍 tools/list called for namespace: <uuid>
+[DEBUG-TOOLS] 📋 Processing N servers          ← N=0? → Namespace leer / Server INACTIVE
+[DEBUG-TOOLS] ❌ No session for: <name>        ← Session konnte nicht aufgebaut werden
+[DEBUG-TOOLS] ✅ tools/list completed ... returning M tools
+tools/list DEGRADED for namespace <uuid>: K/N backend server(s) failed (...)
+```
+
+**Häufigste Ursache: Connection-Pool gesättigt.** Begleitend im Log:
+
+```
+Connection limit reached: 30/30. Refusing to create new connection.
+Skipping connection for server <name> (<uuid>) - connection limit reached
+```
+
+Der Pool (`mcp-server-pool.ts`) deckelt die Gesamtzahl gleichzeitiger Backend-
+Verbindungen (= STDIO-Kindprozesse) auf `MAX_TOTAL_CONNECTIONS`. Mit
+`PREWARM_IDLE_SERVERS=true` (Default) öffnet `startup.ts:initializeIdleServers`
+beim Start **eager** je eine Idle-Verbindung für **jeden** konfigurierten Server
+**plus** eine Idle-MetaMCP-Instanz **pro Namespace** (die wiederum eigene Backend-
+Verbindungen aufbaut). Bei vielen Servern × mehreren Namespaces ist das Limit damit
+**vor dem ersten Client-Request** ausgeschöpft → neue Endpoints bekommen 0 freie
+Slots → alle Backends werden abgelehnt → `returning 0 tools`.
+
+Hinweis: Ein Zählerwert *über* dem Limit (z.B. `31/30`, `32/30`) ist **kein** Bug,
+sondern die mitgezählten In-Flight-Reservierungen (`pendingActiveConnections`) aus
+dem Race-Fix. Der Pool bleibt nur deshalb dauerhaft bei `30/30`, weil konvertierte
+Prewarm-Idle-Sessions sofort nachgespawnt werden und den Floor permanent belegen.
+
+**Fix (Deployment-`.env`, kein Code-Bug):**
+
+```env
+# Lazy statt eager verbinden — Slots werden erst bei tatsächlicher Nutzung belegt
+# und nach SESSION_LIFETIME (30 min) wieder freigegeben.
+PREWARM_IDLE_SERVERS=false
+# Headroom für gleichzeitig aktive Endpoints. Faustregel: >= Summe der gemappten
+# Server über alle gleichzeitig genutzten Namespaces + Puffer. Code-Default ist 100.
+MAX_TOTAL_CONNECTIONS=60
+```
+
+Danach den **metamcp-Container neu starten** — der gesättigte Pool heilt sich nicht
+von selbst (Prewarm-Idles werden sofort nachgezogen); erst ein Restart leert ihn.
+
+Bleibt Prewarm aus RAM-Gründen an, stattdessen nur `MAX_TOTAL_CONNECTIONS` deutlich
+hochsetzen (z.B. 100) — kostet aber entsprechend Idle-RAM/Prozesse.
+
+**Weitere Ursachen für leere Tool-Liste** (falls *nicht* „connection limit reached"
+im Log steht):
+- `Processing 0 servers` → Namespace hat keine Server gemappt oder alle stehen auf
+  `INACTIVE` (`fetch-metamcp.ts` filtert `status != ACTIVE` und `error_status != NONE` raus).
+- Server error-gated → beim Start gecrasht (siehe SDK-Abschnitt oben),
+  `error_status=ERROR` → werden komplett aus `tools/list` ausgeschlossen.
+- Alle Tools der Namespace manuell auf `INACTIVE` → Filter-Middleware entfernt sie
+  nach dem Abruf (`filter-tools.functional.ts`).

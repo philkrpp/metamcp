@@ -37,13 +37,23 @@ services:
       SESSION_LIFETIME: ${SESSION_LIFETIME:-1800000}
       # Hard ceiling on concurrent pooled MCP connections (= STDIO child
       # processes). Code default is 100; 20 keeps idle RAM bounded.
+      #
+      # WARNING: with PREWARM_IDLE_SERVERS=true this cap can be exhausted at
+      # STARTUP before any client connects — startup eagerly opens one idle
+      # connection per configured server PLUS an idle MetaMCP instance per
+      # namespace (each opening its own backend connections). On setups with
+      # many servers × namespaces, leave the cap low ONLY if you also set
+      # PREWARM_IDLE_SERVERS=false; otherwise new endpoints get 0 free slots and
+      # return an empty tool list ("Connection limit reached: N/N. Refusing...").
+      # See CLAUDE.md → "Endpoint liefert leere Tool-Liste".
       MAX_TOTAL_CONNECTIONS: ${MAX_TOTAL_CONNECTIONS:-20}
       # Per-server ceiling on concurrent backend connections (= distinct child
       # processes per serverUuid). Beyond this, sessions reuse the oldest live
       # connection instead of spawning more. Code default is 5.
       MAX_CONNECTIONS_PER_SERVER: ${MAX_CONNECTIONS_PER_SERVER:-5}
       # Eagerly spawn an idle connection for every server + namespace at startup.
-      # false = connect lazily on first use (much lower idle RAM).
+      # false = connect lazily on first use (much lower idle RAM, and avoids
+      # saturating MAX_TOTAL_CONNECTIONS at startup — recommended for large setups).
       PREWARM_IDLE_SERVERS: ${PREWARM_IDLE_SERVERS:-true}
 
       # ========================================================================
