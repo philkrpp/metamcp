@@ -1,6 +1,9 @@
 {
   "compilerOptions": {
     "target": "ES2022",
+    // tsup's DTS build (rollup-plugin-dts) injects a `baseUrl`, which TS 6
+    // flags as a hard deprecation error. Silence it until tsup stops doing so.
+    "ignoreDeprecations": "6.0",
     "lib": ["ES2022", "DOM"],
     "module": "ESNext",
     "moduleResolution": "bundler",

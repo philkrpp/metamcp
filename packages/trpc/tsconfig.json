@@ -6,7 +6,10 @@
     "declaration": true,
     "declarationMap": true,
     "module": "CommonJS",
-    "moduleResolution": "node"
+    "moduleResolution": "node",
+    // TS 6 flags `moduleResolution: node` and tsup's injected `baseUrl` as hard
+    // deprecation errors during the DTS build; silence them (behavior unchanged).
+    "ignoreDeprecations": "6.0"
   },
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist"]

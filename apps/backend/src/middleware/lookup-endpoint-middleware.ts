@@ -11,7 +11,9 @@ export const lookupEndpoint = async (
   res: express.Response,
   next: express.NextFunction,
 ) => {
-  const endpointName = req.params.endpoint_name;
+  // Express 5 / path-to-regexp v8 types params as `string | string[]`;
+  // this route has a single `:endpoint_name` segment, so it is always a string.
+  const endpointName = req.params.endpoint_name as string;
 
   try {
     const endpoint = await endpointsRepository.findByName(endpointName);
