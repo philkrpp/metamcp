@@ -199,7 +199,10 @@ export const authenticateApiKey = async (
         authReq.apiKeyUuid = apiKeyResult.key_uuid;
         authReq.authMethod = "api_key";
 
-        const accessCheckResult = checkApiKeyAccess(apiKeyResult, endpoint);
+        const accessCheckResult = await checkApiKeyAccess(
+          apiKeyResult,
+          endpoint,
+        );
         if (!accessCheckResult.allowed) {
           return res.status(403).json({
             error: "Access denied",
@@ -269,7 +272,10 @@ export const authenticateApiKey = async (
         authReq.apiKeyUuid = apiKeyResult.key_uuid;
         authReq.authMethod = "api_key";
 
-        const accessCheckResult = checkApiKeyAccess(apiKeyResult, endpoint);
+        const accessCheckResult = await checkApiKeyAccess(
+          apiKeyResult,
+          endpoint,
+        );
         if (!accessCheckResult.allowed) {
           return res.status(403).json({
             error: "Access denied",
@@ -369,10 +375,14 @@ export const authenticateApiKey = async (
 /**
  * Check if API key has access to the endpoint
  */
-function checkApiKeyAccess(
-  validation: { user_id?: string | null },
+export async function checkApiKeyAccess(
+  validation: {
+    user_id?: string | null;
+    restrict_endpoints?: boolean;
+    key_uuid?: string;
+  },
   endpoint: DatabaseEndpoint,
-): { allowed: boolean; message?: string } {
+): Promise<{ allowed: boolean; message?: string }> {
   const isPublicApiKey = validation.user_id === null;
   const isPrivateEndpoint = endpoint.user_id !== null;
 
@@ -393,6 +403,21 @@ function checkApiKeyAccess(
       allowed: false,
       message: "You can only access endpoints you own or public endpoints.",
     };
+  }
+
+  if (validation.restrict_endpoints) {
+    if (
+      !validation.key_uuid ||
+      !(await apiKeysRepository.isEndpointAllowed(
+        validation.key_uuid,
+        endpoint.uuid,
+      ))
+    ) {
+      return {
+        allowed: false,
+        message: "This API key is not permitted to access this endpoint.",
+      };
+    }
   }
 
   return { allowed: true };
