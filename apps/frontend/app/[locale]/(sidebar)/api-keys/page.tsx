@@ -258,9 +258,10 @@ export default function ApiKeysPage() {
                   <EndpointAccessSelector
                     restrict={form.watch("restrict_endpoints") ?? false}
                     selected={form.watch("endpoint_uuids") ?? []}
-                    onRestrictChange={(value) =>
-                      form.setValue("restrict_endpoints", value)
-                    }
+                    onRestrictChange={(value) => {
+                      form.setValue("restrict_endpoints", value);
+                      if (!value) form.setValue("endpoint_uuids", []);
+                    }}
                     onSelectedChange={(uuids) =>
                       form.setValue("endpoint_uuids", uuids)
                     }
