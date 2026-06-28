@@ -1,9 +1,9 @@
 import { ApiKeyCreateInput, ApiKeyUpdateInput } from "@repo/zod-types";
-import { and, desc, eq, isNull, or } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, or } from "drizzle-orm";
 import { customAlphabet } from "nanoid";
 
 import { db } from "../index";
-import { apiKeysTable } from "../schema";
+import { apiKeyEndpointAccessTable, apiKeysTable } from "../schema";
 
 const nanoid = customAlphabet(
   "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz",
@@ -19,6 +19,32 @@ export class ApiKeysRepository {
     const key = `sk_mt_${keyPart}`;
 
     return key;
+  }
+
+  /**
+   * Replace all endpoint-access mappings for `keyUuid` in a single transaction.
+   * Existing rows are deleted first, then the new set is bulk-inserted.
+   * If `endpointUuids` is empty the delete still runs (clears all mappings)
+   * but no insert is issued.
+   */
+  private async setEndpointAccess(
+    keyUuid: string,
+    endpointUuids: string[],
+  ): Promise<void> {
+    await db.transaction(async (tx) => {
+      await tx
+        .delete(apiKeyEndpointAccessTable)
+        .where(eq(apiKeyEndpointAccessTable.api_key_uuid, keyUuid));
+
+      if (endpointUuids.length > 0) {
+        await tx.insert(apiKeyEndpointAccessTable).values(
+          endpointUuids.map((endpointUuid) => ({
+            api_key_uuid: keyUuid,
+            endpoint_uuid: endpointUuid,
+          })),
+        );
+      }
+    });
   }
 
   async create(input: ApiKeyCreateInput): Promise<{
@@ -37,6 +63,7 @@ export class ApiKeysRepository {
         key: key,
         user_id: input.user_id,
         is_active: input.is_active ?? true,
+        restrict_endpoints: input.restrict_endpoints ?? false,
       })
       .returning({
         uuid: apiKeysTable.uuid,
@@ -47,6 +74,10 @@ export class ApiKeysRepository {
 
     if (!createdApiKey) {
       throw new Error("Failed to create API key");
+    }
+
+    if (input.endpoint_uuids !== undefined) {
+      await this.setEndpointAccess(createdApiKey.uuid, input.endpoint_uuids);
     }
 
     return {
@@ -101,8 +132,9 @@ export class ApiKeysRepository {
   }
 
   // Find API keys accessible to a specific user (public + user's own keys)
+  // Returns each key with its endpoint_uuids — fetched in ONE batch query (no N+1).
   async findAccessibleToUser(userId: string) {
-    return await db
+    const keys = await db
       .select({
         uuid: apiKeysTable.uuid,
         name: apiKeysTable.name,
@@ -110,6 +142,7 @@ export class ApiKeysRepository {
         created_at: apiKeysTable.created_at,
         is_active: apiKeysTable.is_active,
         user_id: apiKeysTable.user_id,
+        restrict_endpoints: apiKeysTable.restrict_endpoints,
       })
       .from(apiKeysTable)
       .where(
@@ -119,6 +152,31 @@ export class ApiKeysRepository {
         ),
       )
       .orderBy(desc(apiKeysTable.created_at));
+
+    if (keys.length === 0) return [];
+
+    // Batch-fetch all endpoint mappings for the returned keys in ONE query.
+    const keyUuids = keys.map((k) => k.uuid);
+    const mappings = await db
+      .select({
+        api_key_uuid: apiKeyEndpointAccessTable.api_key_uuid,
+        endpoint_uuid: apiKeyEndpointAccessTable.endpoint_uuid,
+      })
+      .from(apiKeyEndpointAccessTable)
+      .where(inArray(apiKeyEndpointAccessTable.api_key_uuid, keyUuids));
+
+    // Group mappings by api_key_uuid in memory.
+    const endpointsByKey = new Map<string, string[]>();
+    for (const mapping of mappings) {
+      const existing = endpointsByKey.get(mapping.api_key_uuid) ?? [];
+      existing.push(mapping.endpoint_uuid);
+      endpointsByKey.set(mapping.api_key_uuid, existing);
+    }
+
+    return keys.map((k) => ({
+      ...k,
+      endpoint_uuids: endpointsByKey.get(k.uuid) ?? [],
+    }));
   }
 
   async findByUuid(uuid: string, userId: string) {
@@ -170,12 +228,14 @@ export class ApiKeysRepository {
     valid: boolean;
     user_id?: string | null;
     key_uuid?: string;
+    restrict_endpoints?: boolean;
   }> {
     const [apiKey] = await db
       .select({
         uuid: apiKeysTable.uuid,
         user_id: apiKeysTable.user_id,
         is_active: apiKeysTable.is_active,
+        restrict_endpoints: apiKeysTable.restrict_endpoints,
       })
       .from(apiKeysTable)
       .where(eq(apiKeysTable.key, key));
@@ -193,6 +253,7 @@ export class ApiKeysRepository {
       valid: true,
       user_id: apiKey.user_id,
       key_uuid: apiKey.uuid,
+      restrict_endpoints: apiKey.restrict_endpoints,
     };
   }
 
@@ -202,6 +263,9 @@ export class ApiKeysRepository {
       .set({
         ...(input.name && { name: input.name }),
         ...(input.is_active !== undefined && { is_active: input.is_active }),
+        ...(input.restrict_endpoints !== undefined && {
+          restrict_endpoints: input.restrict_endpoints,
+        }),
       })
       .where(
         and(
@@ -221,7 +285,45 @@ export class ApiKeysRepository {
       throw new Error("Failed to update API key or API key not found");
     }
 
+    if (input.endpoint_uuids !== undefined) {
+      await this.setEndpointAccess(uuid, input.endpoint_uuids);
+    }
+
     return updatedApiKey;
+  }
+
+  /**
+   * Check whether a specific endpoint is in the access list for the given key.
+   * Returns true iff a junction row exists. Minimal: SELECT 1 + LIMIT 1.
+   */
+  async isEndpointAllowed(
+    keyUuid: string,
+    endpointUuid: string,
+  ): Promise<boolean> {
+    const [row] = await db
+      .select({ uuid: apiKeyEndpointAccessTable.uuid })
+      .from(apiKeyEndpointAccessTable)
+      .where(
+        and(
+          eq(apiKeyEndpointAccessTable.api_key_uuid, keyUuid),
+          eq(apiKeyEndpointAccessTable.endpoint_uuid, endpointUuid),
+        ),
+      )
+      .limit(1);
+
+    return !!row;
+  }
+
+  /**
+   * Return all endpoint UUIDs mapped to `keyUuid`.
+   */
+  async getEndpointUuidsForKey(keyUuid: string): Promise<string[]> {
+    const rows = await db
+      .select({ endpoint_uuid: apiKeyEndpointAccessTable.endpoint_uuid })
+      .from(apiKeyEndpointAccessTable)
+      .where(eq(apiKeyEndpointAccessTable.api_key_uuid, keyUuid));
+
+    return rows.map((r) => r.endpoint_uuid);
   }
 
   async delete(uuid: string, userId: string) {
