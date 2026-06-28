@@ -31,6 +31,8 @@ export const apiKeysImplementations = {
         name: input.name,
         user_id: apiKeyUserId,
         is_active: true,
+        restrict_endpoints: input.restrict_endpoints,
+        endpoint_uuids: input.endpoint_uuids,
       });
 
       return ApiKeysSerializer.serializeCreateApiKeyResponse(result);
@@ -65,6 +67,8 @@ export const apiKeysImplementations = {
       const result = await apiKeysRepository.update(input.uuid, userId, {
         name: input.name,
         is_active: input.is_active,
+        restrict_endpoints: input.restrict_endpoints,
+        endpoint_uuids: input.endpoint_uuids,
       });
 
       return ApiKeysSerializer.serializeApiKey(result);

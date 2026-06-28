@@ -33,5 +33,17 @@
   "ownershipDescription": "API keys privadas são visíveis apenas para você. API keys públicas podem ser usadas por qualquer pessoa.",
   "hideApiKey": "Ocultar API key",
   "showApiKey": "Mostrar API key",
-  "copyFullApiKey": "Copiar API key completa"
+  "copyFullApiKey": "Copiar API key completa",
+  "restrictEndpoints": "Restringir a endpoints específicos",
+  "restrictEndpointsDescription": "Quando ativado, esta API key só pode ser usada com os endpoints selecionados. Quando desativado, a key tem acesso a todos os endpoints.",
+  "selectEndpoints": "Selecionar endpoints",
+  "noEndpointsAvailable": "Nenhum endpoint disponível",
+  "editApiKey": "Editar API Key",
+  "editApiKeyDescription": "Atualize o nome, status e acesso aos endpoints desta API key.",
+  "activeDescription": "Quando desativado, esta API key não pode ser usada para autenticação.",
+  "apiKeyUpdated": "API key atualizada com sucesso",
+  "accessColumn": "Acesso",
+  "allEndpoints": "Todos os endpoints",
+  "allowedEndpoints": "{{count}} endpoints",
+  "noEndpointAccess": "Sem acesso"
 }

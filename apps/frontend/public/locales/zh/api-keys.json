@@ -33,5 +33,17 @@
   "ownershipDescription": "私有 API 密钥只对您可见。公开 API 密钥可供任何人使用。",
   "hideApiKey": "隐藏 API 密钥",
   "showApiKey": "显示 API 密钥",
-  "copyFullApiKey": "复制完整 API 密钥"
+  "copyFullApiKey": "复制完整 API 密钥",
+  "restrictEndpoints": "限制为特定端点",
+  "restrictEndpointsDescription": "启用后，此 API 密钥只能与所选端点一起使用。禁用后，该密钥可访问所有端点。",
+  "selectEndpoints": "选择端点",
+  "noEndpointsAvailable": "没有可用的端点",
+  "editApiKey": "编辑 API 密钥",
+  "editApiKeyDescription": "更新此 API 密钥的名称、状态和端点访问权限。",
+  "activeDescription": "禁用后，此 API 密钥无法用于身份验证。",
+  "apiKeyUpdated": "API 密钥更新成功",
+  "accessColumn": "访问权限",
+  "allEndpoints": "所有端点",
+  "allowedEndpoints": "{{count}} 个端点",
+  "noEndpointAccess": "无访问权限"
 }
