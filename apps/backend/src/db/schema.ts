@@ -405,12 +405,38 @@ export const apiKeysTable = pgTable(
       .notNull()
       .defaultNow(),
     is_active: boolean("is_active").notNull().default(true),
+    restrict_endpoints: boolean("restrict_endpoints").notNull().default(false),
   },
   (table) => [
     index("api_keys_user_id_idx").on(table.user_id),
     index("api_keys_key_idx").on(table.key),
     index("api_keys_is_active_idx").on(table.is_active),
     unique("api_keys_name_per_user_idx").on(table.user_id, table.name),
+  ],
+);
+
+// Junction table: which endpoints an API key is allowed to access (when restrict_endpoints=true)
+export const apiKeyEndpointAccessTable = pgTable(
+  "api_key_endpoint_access",
+  {
+    uuid: uuid("uuid").primaryKey().defaultRandom(),
+    api_key_uuid: uuid("api_key_uuid")
+      .notNull()
+      .references(() => apiKeysTable.uuid, { onDelete: "cascade" }),
+    endpoint_uuid: uuid("endpoint_uuid")
+      .notNull()
+      .references(() => endpointsTable.uuid, { onDelete: "cascade" }),
+    created_at: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index("api_key_endpoint_access_api_key_uuid_idx").on(table.api_key_uuid),
+    index("api_key_endpoint_access_endpoint_uuid_idx").on(table.endpoint_uuid),
+    unique("api_key_endpoint_access_unique").on(
+      table.api_key_uuid,
+      table.endpoint_uuid,
+    ),
   ],
 );
 
