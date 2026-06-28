@@ -2,7 +2,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // Mock the ApiKeysRepository module BEFORE importing the unit under test.
 // isEndpointAllowed is the only method exercised by checkApiKeyAccess.
-const mockIsEndpointAllowed = vi.fn<[string, string], Promise<boolean>>();
+const mockIsEndpointAllowed =
+  vi.fn<(a: string, b: string) => Promise<boolean>>();
 
 vi.mock("../../db/repositories/api-keys.repo", () => {
   return {

@@ -107,7 +107,7 @@ export const ValidateApiKeyResponseSchema = z.object({
 export const ApiKeyCreateInputSchema = z.object({
   name: z.string(),
   user_id: z.string().nullable().optional(),
-  is_active: z.boolean().optional().default(true),
+  is_active: z.boolean().optional(),
   restrict_endpoints: z.boolean().optional(),
   endpoint_uuids: z.array(z.string().uuid()).optional(),
 });
