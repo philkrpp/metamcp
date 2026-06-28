@@ -148,6 +148,26 @@ describe("checkApiKeyAccess", () => {
         allowed: false,
         message: "This API key is not permitted to access this endpoint.",
       });
+      expect(mockIsEndpointAllowed).toHaveBeenCalledOnce();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // (f) Fail-closed: restrict_endpoints true but key_uuid missing → denied,
+  //     and NO DB call (the !validation.key_uuid short-circuit).
+  // -------------------------------------------------------------------------
+  describe("(f) fail-closed when key_uuid is missing", () => {
+    it("denies when restrict_endpoints:true but key_uuid is missing, without a DB call", async () => {
+      const validation = { user_id: "user-1", restrict_endpoints: true }; // no key_uuid
+      const endpoint = makeEndpoint({ user_id: null });
+
+      const result = await checkApiKeyAccess(validation, endpoint);
+
+      expect(result.allowed).toBe(false);
+      expect(result.message).toBe(
+        "This API key is not permitted to access this endpoint.",
+      );
+      expect(mockIsEndpointAllowed).not.toHaveBeenCalled();
     });
   });
 
