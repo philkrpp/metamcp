@@ -2,12 +2,13 @@
 
 import { CreateApiKeyFormSchema } from "@repo/zod-types";
 import { format } from "date-fns";
-import { Copy, Eye, EyeOff, Key, Plus, Trash2 } from "lucide-react";
+import { Copy, Eye, EyeOff, Key, Pencil, Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { z } from "zod";
 
+import { EditApiKey } from "@/components/edit-api-key";
 import { EndpointAccessSelector } from "@/components/endpoint-access-selector";
 import {
   AlertDialog,
@@ -47,6 +48,11 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { useTranslations } from "@/hooks/useTranslations";
 import { trpc } from "@/lib/trpc";
 import { createTranslatedZodResolver } from "@/lib/zod-resolver";
@@ -62,9 +68,19 @@ export default function ApiKeysPage() {
     uuid: string;
     name: string;
   } | null>(null);
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [apiKeyToEdit, setApiKeyToEdit] = useState<{
+    uuid: string;
+    name: string;
+    is_active: boolean;
+    restrict_endpoints: boolean;
+    endpoint_uuids: string[];
+  } | null>(null);
   const { t } = useTranslations();
 
   const { data: apiKeys, refetch } = trpc.frontend.apiKeys.list.useQuery();
+  const { data: endpointsResponse } = trpc.frontend.endpoints.list.useQuery();
+  const endpoints = endpointsResponse?.success ? endpointsResponse.data : [];
   const createMutation = trpc.frontend.apiKeys.create.useMutation({
     onSuccess: (data) => {
       setNewApiKey(data.key);
@@ -147,6 +163,31 @@ export default function ApiKeysPage() {
   const handleDeleteCancel = () => {
     setDeleteDialogOpen(false);
     setApiKeyToDelete(null);
+  };
+
+  const handleEditClick = (apiKey: {
+    uuid: string;
+    name: string;
+    is_active: boolean;
+    restrict_endpoints: boolean;
+    endpoint_uuids: string[];
+  }) => {
+    setApiKeyToEdit(apiKey);
+    setEditDialogOpen(true);
+  };
+
+  const handleEditClose = () => {
+    setEditDialogOpen(false);
+    setApiKeyToEdit(null);
+  };
+
+  const handleEditSuccess = () => {
+    refetch();
+  };
+
+  const resolveEndpointName = (uuid: string): string => {
+    const endpoint = endpoints.find((ep) => ep.uuid === uuid);
+    return endpoint?.name ?? uuid;
   };
 
   return (
@@ -303,13 +344,14 @@ export default function ApiKeysPage() {
               <TableHead>{t("api-keys:created")}</TableHead>
               <TableHead>{t("common:status")}</TableHead>
               <TableHead>{t("api-keys:ownership")}</TableHead>
-              <TableHead className="w-[100px]">{t("common:actions")}</TableHead>
+              <TableHead>{t("api-keys:accessColumn")}</TableHead>
+              <TableHead className="w-[120px]">{t("common:actions")}</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {apiKeys?.apiKeys?.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={6} className="text-center py-12">
+                <TableCell colSpan={7} className="text-center py-12">
                   <div className="flex flex-col items-center gap-2">
                     <Key className="h-8 w-8 text-muted-foreground" />
                     <p className="text-muted-foreground">
@@ -390,19 +432,66 @@ export default function ApiKeysPage() {
                     </Badge>
                   </TableCell>
                   <TableCell>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() =>
-                        handleDeleteClick({
-                          uuid: apiKey.uuid,
-                          name: apiKey.name,
-                        })
-                      }
-                      disabled={deleteMutation.isPending}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
+                    {!apiKey.restrict_endpoints ? (
+                      <Badge
+                        variant="outline"
+                        className="bg-blue-50 dark:bg-blue-950/20 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800"
+                      >
+                        {t("api-keys:allEndpoints")}
+                      </Badge>
+                    ) : apiKey.endpoint_uuids.length > 0 ? (
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Badge
+                            variant="outline"
+                            className="bg-purple-50 dark:bg-purple-950/20 text-purple-700 dark:text-purple-300 border-purple-200 dark:border-purple-800 cursor-default"
+                          >
+                            {t("api-keys:allowedEndpoints", {
+                              count: apiKey.endpoint_uuids.length,
+                            })}
+                          </Badge>
+                        </TooltipTrigger>
+                        <TooltipContent className="max-w-[260px]">
+                          <ul className="space-y-0.5">
+                            {apiKey.endpoint_uuids.map((uuid) => (
+                              <li key={uuid}>{resolveEndpointName(uuid)}</li>
+                            ))}
+                          </ul>
+                        </TooltipContent>
+                      </Tooltip>
+                    ) : (
+                      <Badge
+                        variant="outline"
+                        className="bg-red-50 dark:bg-red-950/20 text-red-700 dark:text-red-300 border-red-200 dark:border-red-800"
+                      >
+                        {t("api-keys:noEndpointAccess")}
+                      </Badge>
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex items-center gap-1">
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => handleEditClick(apiKey)}
+                        title={t("api-keys:editApiKey")}
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() =>
+                          handleDeleteClick({
+                            uuid: apiKey.uuid,
+                            name: apiKey.name,
+                          })
+                        }
+                        disabled={deleteMutation.isPending}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
                   </TableCell>
                 </TableRow>
               ))
@@ -410,6 +499,14 @@ export default function ApiKeysPage() {
           </TableBody>
         </Table>
       </div>
+
+      {/* Edit API Key Dialog */}
+      <EditApiKey
+        apiKey={apiKeyToEdit}
+        isOpen={editDialogOpen}
+        onClose={handleEditClose}
+        onSuccess={handleEditSuccess}
+      />
 
       {/* Delete Confirmation Dialog */}
       <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>

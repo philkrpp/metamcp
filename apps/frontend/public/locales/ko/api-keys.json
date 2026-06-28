@@ -37,5 +37,13 @@
   "restrictEndpoints": "Restrict to specific endpoints",
   "restrictEndpointsDescription": "When enabled, this API key can only be used with the selected endpoints. When disabled, the key has access to all endpoints.",
   "selectEndpoints": "Select endpoints",
-  "noEndpointsAvailable": "No endpoints available"
+  "noEndpointsAvailable": "No endpoints available",
+  "editApiKey": "Edit API Key",
+  "editApiKeyDescription": "Update the name, status, and endpoint access for this API key.",
+  "activeDescription": "When disabled, this API key cannot be used to authenticate.",
+  "apiKeyUpdated": "API key updated successfully",
+  "accessColumn": "Access",
+  "allEndpoints": "All endpoints",
+  "allowedEndpoints": "{{count}} endpoints",
+  "noEndpointAccess": "No access"
 }
