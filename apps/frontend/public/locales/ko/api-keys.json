@@ -33,5 +33,9 @@
   "ownershipDescription": "비공개 API Key는 본인만 볼 수 있습니다. 공개 API Key는 누구나 사용할 수 있습니다.",
   "hideApiKey": "API Key 숨기기",
   "showApiKey": "API Key 표시",
-  "copyFullApiKey": "전체 API Key 복사"
+  "copyFullApiKey": "전체 API Key 복사",
+  "restrictEndpoints": "Restrict to specific endpoints",
+  "restrictEndpointsDescription": "When enabled, this API key can only be used with the selected endpoints. When disabled, the key has access to all endpoints.",
+  "selectEndpoints": "Select endpoints",
+  "noEndpointsAvailable": "No endpoints available"
 }

@@ -8,6 +8,7 @@ import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { z } from "zod";
 
+import { EndpointAccessSelector } from "@/components/endpoint-access-selector";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -97,6 +98,8 @@ export default function ApiKeysPage() {
     defaultValues: {
       name: "",
       user_id: undefined, // Will be set based on ownership selection
+      restrict_endpoints: false,
+      endpoint_uuids: [],
     },
   });
 
@@ -250,6 +253,18 @@ export default function ApiKeysPage() {
                   <p className="text-xs text-muted-foreground mt-1">
                     {t("api-keys:ownershipDescription")}
                   </p>
+                </div>
+                <div>
+                  <EndpointAccessSelector
+                    restrict={form.watch("restrict_endpoints") ?? false}
+                    selected={form.watch("endpoint_uuids") ?? []}
+                    onRestrictChange={(value) =>
+                      form.setValue("restrict_endpoints", value)
+                    }
+                    onSelectedChange={(uuids) =>
+                      form.setValue("endpoint_uuids", uuids)
+                    }
+                  />
                 </div>
                 <div className="flex gap-2">
                   <Button

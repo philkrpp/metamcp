@@ -33,5 +33,9 @@
   "ownershipDescription": "API keys privadas são visíveis apenas para você. API keys públicas podem ser usadas por qualquer pessoa.",
   "hideApiKey": "Ocultar API key",
   "showApiKey": "Mostrar API key",
-  "copyFullApiKey": "Copiar API key completa"
+  "copyFullApiKey": "Copiar API key completa",
+  "restrictEndpoints": "Restrict to specific endpoints",
+  "restrictEndpointsDescription": "When enabled, this API key can only be used with the selected endpoints. When disabled, the key has access to all endpoints.",
+  "selectEndpoints": "Select endpoints",
+  "noEndpointsAvailable": "No endpoints available"
 }
