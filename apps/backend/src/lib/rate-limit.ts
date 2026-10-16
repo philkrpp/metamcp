@@ -100,36 +100,24 @@ export class RateLimiting {
 
   async onRequest(context: Context, callNext: CallNext): Promise<unknown> {
     const { endpoint } = context.req;
-    const { user_id, namespace_uuid } = endpoint;
-    const backgroundIdleSessions =
-      mcpServerPool.getBackgroundIdleSessionsByNamespace();
-    let limiter = this.limiters.get(namespace_uuid);
-
-    const maxRateSeconds = endpoint.max_rate_seconds ?? 0;
     const maxRate = endpoint.max_rate ?? 0;
+    const maxRateSeconds = endpoint.max_rate_seconds ?? 0;
 
-    if (backgroundIdleSessions.size > 0) {
-      if (
-        backgroundIdleSessions.get(namespace_uuid)?.get("status") === "created"
-      ) {
-        if (!backgroundIdleSessions.get(namespace_uuid)?.has(user_id)) {
-          backgroundIdleSessions
-            .get(namespace_uuid)
-            ?.set(user_id, "initialized");
-          if (!limiter) {
-            this.limiters.set(
-              namespace_uuid,
-              new TokenBucketRateLimiter(maxRate, maxRateSeconds),
-            );
-            limiter = this.limiters.get(namespace_uuid);
-          }
-        }
-      }
+    if (maxRate <= 0 || maxRateSeconds <= 0) {
+      return callNext(context);
+    }
 
-      const allowed = limiter?.consume();
-      if (!allowed) {
-        throw new RateLimitError(`Rate limit exceeded`);
-      }
+    // One bucket per endpoint and config: endpoints may share a namespace,
+    // and an edited limit must apply without waiting for idle cleanup.
+    const key = `${endpoint.uuid}:${maxRate}:${maxRateSeconds}`;
+    let limiter = this.limiters.get(key);
+    if (!limiter) {
+      limiter = new TokenBucketRateLimiter(maxRate, maxRate / maxRateSeconds);
+      this.limiters.set(key, limiter);
+    }
+
+    if (!limiter.consume()) {
+      throw new RateLimitError(`Rate limit exceeded`);
     }
     return callNext(context);
   }

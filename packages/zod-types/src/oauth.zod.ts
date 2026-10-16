@@ -23,6 +23,8 @@ export const OAuthTokensSchema = z.object({
   expires_in: z.number().optional(),
   scope: z.string().optional(),
   refresh_token: z.string().optional(),
+  // Authorization-server stamp written by MCP SDK >= 1.31.
+  issuer: z.string().optional(),
 });
 
 // Upstream token-response schema (RFC 6749 §5.1 plus common provider

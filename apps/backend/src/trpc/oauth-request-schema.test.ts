@@ -1,6 +1,7 @@
 import {
   OAuthClientInfoRequestSchema,
   OAuthClientInformationSchema,
+  OAuthTokensSchema,
 } from "@repo/zod-types";
 import { describe, expect, it } from "vitest";
 
@@ -126,5 +127,16 @@ describe("SDK OAuthClientInformationSchema cross-cut", () => {
     // server-side token exchange reads the rest directly from the DB row.
     expect(parsed.client_id).toBe("3MVG9.Salesforce");
     expect(parsed.client_secret).toBe("shh");
+  });
+});
+
+describe("OAuthTokensSchema", () => {
+  it("keeps the issuer stamp the MCP SDK writes since 1.31", () => {
+    const parsed = OAuthTokensSchema.parse({
+      access_token: "at",
+      token_type: "Bearer",
+      issuer: "https://auth.example.com",
+    });
+    expect(parsed.issuer).toBe("https://auth.example.com");
   });
 });

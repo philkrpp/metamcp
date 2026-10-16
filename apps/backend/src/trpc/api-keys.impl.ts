@@ -15,6 +15,7 @@ import logger from "@/utils/logger";
 
 import { ApiKeysRepository } from "../db/repositories";
 import { ApiKeysSerializer } from "../db/serializers";
+import { resolveApiKeyOwner } from "./api-key-owner";
 
 const apiKeysRepository = new ApiKeysRepository();
 
@@ -24,8 +25,7 @@ export const apiKeysImplementations = {
     userId: string,
   ): Promise<z.infer<typeof CreateApiKeyResponseSchema>> => {
     try {
-      // Use input.user_id if provided, otherwise default to current user (private)
-      const apiKeyUserId = input.user_id !== undefined ? input.user_id : userId;
+      const apiKeyUserId = resolveApiKeyOwner(input.user_id, userId);
 
       const result = await apiKeysRepository.create({
         name: input.name,
