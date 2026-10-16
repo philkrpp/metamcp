@@ -13,6 +13,7 @@ export class EndpointsSerializer {
       description: dbEndpoint.description,
       namespace_uuid: dbEndpoint.namespace_uuid,
       enable_api_key_auth: dbEndpoint.enable_api_key_auth,
+      require_scoped_api_key: dbEndpoint.require_scoped_api_key,
       enableClientMaxRate: dbEndpoint.enable_client_max_rate,
       enableMaxRate: dbEndpoint.enable_max_rate,
       maxRateSeconds:
@@ -58,6 +59,7 @@ export class EndpointsSerializer {
       description: dbEndpoint.description,
       namespace_uuid: dbEndpoint.namespace_uuid,
       enable_api_key_auth: dbEndpoint.enable_api_key_auth,
+      require_scoped_api_key: dbEndpoint.require_scoped_api_key,
       enableClientMaxRate: dbEndpoint.enable_client_max_rate,
       enableMaxRate: dbEndpoint.enable_max_rate,
       maxRateSeconds:
@@ -94,6 +96,7 @@ export class EndpointsSerializer {
         created_at: dbEndpoint.namespace.created_at.toISOString(),
         updated_at: dbEndpoint.namespace.updated_at.toISOString(),
         user_id: dbEndpoint.namespace.user_id,
+        tool_policy: dbEndpoint.namespace.tool_policy,
       },
     };
   }

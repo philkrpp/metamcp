@@ -7,7 +7,8 @@ import { isRecoverableBackendError } from "./session-error";
 
 /**
  * Minimal slice of McpServerPool the recovery wrapper needs. Structural
- * so tests can drive the wrapper with a fake pool.
+ * so tests can drive the wrapper with a fake pool (same pattern as
+ * mcp-server-pool.test.ts).
  */
 export interface RecoverySessionPool {
   invalidateServerConnection(
@@ -41,8 +42,8 @@ export interface RequestWithSessionRecoveryOptions<T> {
    */
   attempt: (session: ConnectedClient) => Promise<T>;
   /**
-   * Called when recovery swapped in a fresh session — lets the caller
-   * repoint tool/prompt/resource maps to the new client.
+   * Called when recovery swapped in a fresh session — re-register
+   * list_changed subscribers, repoint tool/prompt/resource maps, etc.
    */
   onFreshSession?: (session: ConnectedClient) => void;
 }
@@ -52,11 +53,17 @@ export interface RequestWithSessionRecoveryOptions<T> {
  * inside the aggregate list handlers (tools/list, prompts/list,
  * resources/list, resources/templates/list).
  *
- * The aggregate list handlers previously logged-and-continued in their
- * catch blocks, so a dead pooled session (e.g. after a restart of the
- * backend container) made the namespace return a "successful" 0-tool
- * response on every request, forever — the swallowed error meant the
- * zombie connection was never invalidated.
+ * `tools/call` and the dynamic-find path in `metamcp-proxy.ts` have had
+ * this cascade since PR #13/#16; the OpenAPI bridge since its own
+ * regression fix. (`tools/call` has since been narrowed to replay only on
+ * `isToolCallReplaySafeError`, because it is not idempotent; this helper
+ * is for list requests, which are.) The aggregate list handlers were the
+ * remaining gap:
+ * their catch blocks logged-and-continued, so a dead pooled session
+ * (e.g. after a Watchtower swap of the backend container) made the
+ * namespace return a "successful" 0-tool response on every request,
+ * forever — the swallowed error meant the zombie connection was never
+ * invalidated (observed in production as a 24h zero-tool outage).
  *
  * Throws when the error is non-recoverable, when no fresh session could
  * be established, or when the retry on the fresh session fails — the

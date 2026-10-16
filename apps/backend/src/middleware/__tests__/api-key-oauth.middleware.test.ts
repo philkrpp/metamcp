@@ -1,34 +1,68 @@
+// TEMP(api-key-legacy-scope): remove once legacy multi-endpoint keys are replaced
+//
+// Unit tests for checkApiKeyAccessWithLegacyScope — the shim that keeps keys
+// minted under our pre-umbrella n:m model (rows in `api_key_endpoint_access`,
+// `endpoint_uuid IS NULL`) confined to their listed endpoints, while keys
+// without legacy rows behave exactly as umbrella's checkApiKeyAccess.
+import { DatabaseEndpoint } from "@repo/zod-types";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-// Mock the ApiKeysRepository module BEFORE importing the unit under test.
-// isEndpointAllowed is the only method exercised by checkApiKeyAccess.
-const mockIsEndpointAllowed =
-  vi.fn<(a: string, b: string) => Promise<boolean>>();
+const mockGetLegacyEndpointScope =
+  vi.fn<(a: string) => Promise<string[] | null>>();
 
+vi.mock("@/utils/logger", () => ({
+  default: {
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    debug: vi.fn(),
+  },
+}));
+
+// Mock the ApiKeysRepository module BEFORE importing the unit under test.
 vi.mock("../../db/repositories/api-keys.repo", () => {
   return {
     // Must use a real function/class so `new ApiKeysRepository()` works.
     ApiKeysRepository: vi.fn(function (this: Record<string, unknown>) {
-      this.isEndpointAllowed = mockIsEndpointAllowed;
+      this.validateApiKey = vi.fn();
+      this.getLegacyEndpointScope = mockGetLegacyEndpointScope;
     }),
   };
 });
 
-// Import AFTER vi.mock so the singleton in the middleware binds to the fake.
-const { checkApiKeyAccess } = await import("../api-key-oauth.middleware");
+// The middleware's module-load import chain reaches db/index through these
+// repositories; none of them is exercised by the functions under test.
+vi.mock("../../db/repositories/users.repo", () => ({
+  usersRepository: { isDisabled: vi.fn() },
+}));
+vi.mock("../../db/repositories/oauth.repo", () => ({
+  oauthRepository: { getAccessToken: vi.fn() },
+}));
+vi.mock("../../db/repositories/access-groups.repo", () => ({
+  accessGroupsRepository: {
+    hasEndpointGrant: vi.fn().mockResolvedValue(false),
+  },
+}));
 
-// Minimal DatabaseEndpoint stub — only fields used by checkApiKeyAccess.
+// Import AFTER vi.mock so the singleton in the middleware binds to the fake.
+const { checkApiKeyAccessWithLegacyScope } = await import(
+  "../api-key-oauth.middleware"
+);
+
+const ENDPOINT_A = "11111111-1111-4111-8111-111111111111";
+const ENDPOINT_B = "22222222-2222-4222-8222-222222222222";
+const ENDPOINT_C = "33333333-3333-4333-8333-333333333333";
+
 function makeEndpoint(
-  overrides: { uuid?: string; user_id?: string | null } = {},
-) {
+  overrides: Partial<DatabaseEndpoint> = {},
+): DatabaseEndpoint {
   return {
-    uuid: overrides.uuid ?? "endpoint-uuid-1",
-    user_id: overrides.user_id !== undefined ? overrides.user_id : null,
-    // Other DatabaseEndpoint fields are not relevant to checkApiKeyAccess.
+    uuid: ENDPOINT_A,
     name: "test-endpoint",
     description: null,
-    namespace_uuid: "ns-uuid",
+    namespace_uuid: "44444444-4444-4444-8444-444444444444",
     enable_api_key_auth: true,
+    require_scoped_api_key: false,
     enable_max_rate: false,
     enable_client_max_rate: false,
     max_rate_seconds: null,
@@ -40,177 +74,137 @@ function makeEndpoint(
     enable_oauth: false,
     use_query_param_auth: false,
     enable_metamcp_admin_tools: false,
-    created_at: new Date(),
-    updated_at: new Date(),
-  } as const;
+    restricted: false,
+    created_at: new Date("2026-07-01T00:00:00Z"),
+    updated_at: new Date("2026-07-01T00:00:00Z"),
+    user_id: null,
+    ...overrides,
+  };
 }
 
-describe("checkApiKeyAccess", () => {
+describe("checkApiKeyAccessWithLegacyScope", () => {
   beforeEach(() => {
-    mockIsEndpointAllowed.mockReset();
+    mockGetLegacyEndpointScope.mockReset();
   });
 
-  // -------------------------------------------------------------------------
-  // (a) Unrestricted key → allowed, NO DB call (constraint #2)
-  // -------------------------------------------------------------------------
-  describe("(a) unrestricted key", () => {
-    it("allows access to a public endpoint and does NOT call isEndpointAllowed", async () => {
-      const validation = {
-        user_id: "user-1",
-        restrict_endpoints: false,
-        key_uuid: "key-uuid-1",
-      };
-      const endpoint = makeEndpoint({ user_id: null });
+  describe("unscoped key (endpoint_uuid NULL) with legacy n:m rows", () => {
+    it("allows access on an endpoint listed in the legacy rows", async () => {
+      mockGetLegacyEndpointScope.mockResolvedValue([ENDPOINT_A, ENDPOINT_B]);
 
-      const result = await checkApiKeyAccess(validation, endpoint);
-
-      expect(result).toEqual({ allowed: true });
-      expect(mockIsEndpointAllowed).not.toHaveBeenCalled();
-    });
-
-    it("allows access when restrict_endpoints is undefined and does NOT call isEndpointAllowed", async () => {
-      const validation = { user_id: "user-1" }; // restrict_endpoints omitted (falsy)
-      const endpoint = makeEndpoint({ user_id: null });
-
-      const result = await checkApiKeyAccess(validation, endpoint);
-
-      expect(result).toEqual({ allowed: true });
-      expect(mockIsEndpointAllowed).not.toHaveBeenCalled();
-    });
-  });
-
-  // -------------------------------------------------------------------------
-  // (b) Restricted key + isEndpointAllowed resolves true → allowed
-  // -------------------------------------------------------------------------
-  describe("(b) restricted key, endpoint in allow-list", () => {
-    it("returns allowed:true when the endpoint is in the key's allow-list", async () => {
-      mockIsEndpointAllowed.mockResolvedValue(true);
-
-      const validation = {
-        user_id: "user-1",
-        restrict_endpoints: true,
-        key_uuid: "key-uuid-1",
-      };
-      const endpoint = makeEndpoint({ uuid: "endpoint-uuid-1", user_id: null });
-
-      const result = await checkApiKeyAccess(validation, endpoint);
-
-      expect(result).toEqual({ allowed: true });
-      expect(mockIsEndpointAllowed).toHaveBeenCalledOnce();
-      expect(mockIsEndpointAllowed).toHaveBeenCalledWith(
-        "key-uuid-1",
-        "endpoint-uuid-1",
+      const result = await checkApiKeyAccessWithLegacyScope(
+        { user_id: null, endpoint_uuid: null, key_uuid: "key-legacy" },
+        makeEndpoint({ uuid: ENDPOINT_B }),
       );
+
+      expect(result).toEqual({ allowed: true });
+      expect(mockGetLegacyEndpointScope).toHaveBeenCalledWith("key-legacy");
     });
-  });
 
-  // -------------------------------------------------------------------------
-  // (c) Restricted key + isEndpointAllowed resolves false → denied
-  // -------------------------------------------------------------------------
-  describe("(c) restricted key, endpoint NOT in allow-list", () => {
-    it("returns allowed:false with the scope message", async () => {
-      mockIsEndpointAllowed.mockResolvedValue(false);
+    it("denies access on an endpoint NOT listed in the legacy rows", async () => {
+      mockGetLegacyEndpointScope.mockResolvedValue([ENDPOINT_A, ENDPOINT_B]);
 
-      const validation = {
-        user_id: "user-1",
-        restrict_endpoints: true,
-        key_uuid: "key-uuid-1",
-      };
-      const endpoint = makeEndpoint({ uuid: "endpoint-uuid-2", user_id: null });
-
-      const result = await checkApiKeyAccess(validation, endpoint);
+      const result = await checkApiKeyAccessWithLegacyScope(
+        { user_id: null, endpoint_uuid: null, key_uuid: "key-legacy" },
+        makeEndpoint({ uuid: ENDPOINT_C }),
+      );
 
       expect(result).toEqual({
         allowed: false,
         message: "This API key is not permitted to access this endpoint.",
       });
-      expect(mockIsEndpointAllowed).toHaveBeenCalledOnce();
     });
-  });
 
-  // -------------------------------------------------------------------------
-  // (d) Restricted key with empty mappings behaves like (c) → denied
-  // -------------------------------------------------------------------------
-  describe("(d) restricted key with no mappings (empty allow-list)", () => {
-    it("denies access when isEndpointAllowed returns false (empty list)", async () => {
-      // Empty allow-list means no junction rows → isEndpointAllowed returns false.
-      mockIsEndpointAllowed.mockResolvedValue(false);
+    it("treats an undefined endpoint_uuid like NULL", async () => {
+      mockGetLegacyEndpointScope.mockResolvedValue([ENDPOINT_A]);
 
-      const validation = {
-        user_id: "user-1",
-        restrict_endpoints: true,
-        key_uuid: "key-uuid-empty",
-      };
-      const endpoint = makeEndpoint({ uuid: "any-endpoint", user_id: null });
-
-      const result = await checkApiKeyAccess(validation, endpoint);
-
-      expect(result).toEqual({
-        allowed: false,
-        message: "This API key is not permitted to access this endpoint.",
-      });
-      expect(mockIsEndpointAllowed).toHaveBeenCalledOnce();
-    });
-  });
-
-  // -------------------------------------------------------------------------
-  // (f) Fail-closed: restrict_endpoints true but key_uuid missing → denied,
-  //     and NO DB call (the !validation.key_uuid short-circuit).
-  // -------------------------------------------------------------------------
-  describe("(f) fail-closed when key_uuid is missing", () => {
-    it("denies when restrict_endpoints:true but key_uuid is missing, without a DB call", async () => {
-      const validation = { user_id: "user-1", restrict_endpoints: true }; // no key_uuid
-      const endpoint = makeEndpoint({ user_id: null });
-
-      const result = await checkApiKeyAccess(validation, endpoint);
+      const result = await checkApiKeyAccessWithLegacyScope(
+        { user_id: null, key_uuid: "key-legacy" },
+        makeEndpoint({ uuid: ENDPOINT_C }),
+      );
 
       expect(result.allowed).toBe(false);
-      expect(result.message).toBe(
-        "This API key is not permitted to access this endpoint.",
+    });
+
+    it("fails closed when the legacy lookup throws", async () => {
+      mockGetLegacyEndpointScope.mockRejectedValue(new Error("db down"));
+
+      const result = await checkApiKeyAccessWithLegacyScope(
+        { user_id: null, endpoint_uuid: null, key_uuid: "key-legacy" },
+        makeEndpoint({ uuid: ENDPOINT_A }),
       );
-      expect(mockIsEndpointAllowed).not.toHaveBeenCalled();
+
+      expect(result.allowed).toBe(false);
+    });
+
+    it("denies everywhere once a restricted key has no endpoints left", async () => {
+      // restrict_endpoints = true with zero rows: e.g. every listed endpoint
+      // was deleted (ON DELETE CASCADE). Must not widen to gateway-wide.
+      mockGetLegacyEndpointScope.mockResolvedValue([]);
+
+      const result = await checkApiKeyAccessWithLegacyScope(
+        { user_id: null, endpoint_uuid: null, key_uuid: "key-legacy" },
+        makeEndpoint({ uuid: ENDPOINT_A }),
+      );
+
+      expect(result.allowed).toBe(false);
     });
   });
 
-  // -------------------------------------------------------------------------
-  // (e) Existing ownership checks still fire BEFORE scope check
-  // -------------------------------------------------------------------------
-  describe("(e) ownership checks preserved", () => {
-    it("denies public API key (user_id null) access to a private endpoint with the ownership message", async () => {
-      const validation = {
-        user_id: null, // public key
-        restrict_endpoints: false,
-        key_uuid: "key-uuid-public",
-      };
-      const endpoint = makeEndpoint({ user_id: "owner-user-id" }); // private endpoint
+  describe("unscoped key not legacy-restricted → umbrella behaviour", () => {
+    it("allows access gateway-wide (any endpoint)", async () => {
+      mockGetLegacyEndpointScope.mockResolvedValue(null);
 
-      const result = await checkApiKeyAccess(validation, endpoint);
+      const result = await checkApiKeyAccessWithLegacyScope(
+        { user_id: null, endpoint_uuid: null, key_uuid: "key-unscoped" },
+        makeEndpoint({ uuid: ENDPOINT_C }),
+      );
 
-      expect(result).toEqual({
-        allowed: false,
-        message:
-          "Public API keys cannot access private endpoints. Use a private API key owned by the endpoint owner.",
-      });
-      // Scope check must NOT have been reached.
-      expect(mockIsEndpointAllowed).not.toHaveBeenCalled();
+      expect(result).toEqual({ allowed: true });
     });
 
-    it("denies a private key that does not own the private endpoint with the ownership message", async () => {
-      const validation = {
-        user_id: "user-1", // different from endpoint owner
-        restrict_endpoints: true, // scope enabled, but should not be reached
-        key_uuid: "key-uuid-1",
-      };
-      const endpoint = makeEndpoint({ user_id: "user-2" }); // owned by someone else
+    it("is still refused by require_scoped_api_key, without a legacy lookup", async () => {
+      const result = await checkApiKeyAccessWithLegacyScope(
+        { user_id: null, endpoint_uuid: null, key_uuid: "key-unscoped" },
+        makeEndpoint({ require_scoped_api_key: true }),
+      );
 
-      const result = await checkApiKeyAccess(validation, endpoint);
+      expect(result.allowed).toBe(false);
+      expect(result.message).toMatch(/requires an endpoint-scoped API key/i);
+      expect(mockGetLegacyEndpointScope).not.toHaveBeenCalled();
+    });
 
-      expect(result).toEqual({
-        allowed: false,
-        message: "You can only access endpoints you own or public endpoints.",
-      });
-      // Scope check must NOT have been reached.
-      expect(mockIsEndpointAllowed).not.toHaveBeenCalled();
+    it("keeps umbrella's ownership denial, without a legacy lookup", async () => {
+      const result = await checkApiKeyAccessWithLegacyScope(
+        { user_id: null, endpoint_uuid: null, key_uuid: "key-public" },
+        makeEndpoint({ user_id: "owner-user-id" }),
+      );
+
+      expect(result.allowed).toBe(false);
+      expect(result.message).toMatch(/Public API keys cannot access private/);
+      expect(mockGetLegacyEndpointScope).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("scoped key (endpoint_uuid set) → umbrella behaviour, no lookup", () => {
+    it("allows on its bound endpoint without reading legacy rows", async () => {
+      const result = await checkApiKeyAccessWithLegacyScope(
+        { user_id: null, endpoint_uuid: ENDPOINT_A, key_uuid: "key-scoped" },
+        makeEndpoint({ uuid: ENDPOINT_A }),
+      );
+
+      expect(result).toEqual({ allowed: true });
+      expect(mockGetLegacyEndpointScope).not.toHaveBeenCalled();
+    });
+
+    it("denies on any other endpoint without reading legacy rows", async () => {
+      const result = await checkApiKeyAccessWithLegacyScope(
+        { user_id: null, endpoint_uuid: ENDPOINT_A, key_uuid: "key-scoped" },
+        makeEndpoint({ uuid: ENDPOINT_B }),
+      );
+
+      expect(result.allowed).toBe(false);
+      expect(result.message).toMatch(/scoped to a different endpoint/i);
+      expect(mockGetLegacyEndpointScope).not.toHaveBeenCalled();
     });
   });
 });

@@ -79,9 +79,6 @@ export function EndpointsList({ onRefresh }: EndpointsListProps) {
     error,
   } = trpc.frontend.endpoints.list.useQuery();
 
-  // Fetch user's API keys to use in URLs
-  const { data: apiKeysResponse } = trpc.frontend.apiKeys.list.useQuery();
-
   // Delete mutation
   const deleteEndpointMutation = trpc.frontend.endpoints.delete.useMutation({
     onSuccess: (data) => {
@@ -233,7 +230,13 @@ export function EndpointsList({ onRefresh }: EndpointsListProps) {
         return (
           <div className="px-3 pl-0 py-2">
             {description ? (
-              <p className="text-sm">{description}</p>
+              // Cap the width and truncate: descriptions run long and the cell
+              // is whitespace-nowrap, so an untruncated one used to push the
+              // table (and the page) wider than the viewport. The full text
+              // stays available on hover via the title attribute.
+              <p className="max-w-md truncate text-sm" title={description}>
+                {description}
+              </p>
             ) : (
               <span className="text-sm text-muted-foreground italic">
                 {t("endpoints:list.noDescription")}
@@ -328,11 +331,15 @@ export function EndpointsList({ onRefresh }: EndpointsListProps) {
           toast.success(t("endpoints:list.openApiSchemaUrlCopied"));
         };
 
-        const getApiKey = () => {
-          const apiKeys = apiKeysResponse?.apiKeys || [];
-          const activeApiKey = apiKeys.find((key) => key.is_active);
-          return activeApiKey?.key || "YOUR_API_KEY";
-        };
+        // Always a placeholder now. This used to substitute the caller's
+        // first active key from apiKeys.list — which for a member is
+        // whatever PUBLIC key exists — so the "copy URL with API key" items
+        // were a second distribution channel for the gateway-wide secret
+        // the list itself was leaking. `list` returns prefixes only as of
+        // the 2026-08-13 masking fix, and a truncated key in a URL would
+        // just 401, so the URL is copied with the placeholder for the
+        // operator to substitute with a key they hold.
+        const getApiKey = () => "YOUR_API_KEY";
 
         const copyFullSseUrlWithApiKey = () => {
           const apiKey = getApiKey();
@@ -589,6 +596,12 @@ export function EndpointsList({ onRefresh }: EndpointsListProps) {
               {t("endpoints:list.deleteConfirmDescription", {
                 name: endpointToDelete?.name || "",
               })}
+            </DialogDescription>
+            {/* Endpoint-scoped API keys FK to this endpoint with ON DELETE
+                CASCADE (migration 0023) — deleting the endpoint also destroys
+                every key bound to it. Warn before the irreversible action. */}
+            <DialogDescription className="text-destructive">
+              {t("endpoints:list.deleteConfirmScopedKeyWarning")}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>

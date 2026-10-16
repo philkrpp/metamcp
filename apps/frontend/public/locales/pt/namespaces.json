@@ -91,7 +91,18 @@
     "toggleTooFast": "Alternância Muito Rápida",
     "toggleTooFastDescription": "Por favor, aguarde antes de alternar novamente para permitir que a sessão inicialize corretamente.",
     "forceReset": "Redefinição Forçada",
-    "anErrorOccurredWhileDeleting": "Ocorreu um erro ao excluir o namespace"
+    "anErrorOccurredWhileDeleting": "Ocorreu um erro ao excluir o namespace",
+    "toolPolicy": "Tool Policy",
+    "toolPolicyAllowAll": "Allow all",
+    "toolPolicyAllowlist": "Allowlist",
+    "toolPolicyAllowAllHelp": "Tools with no row in Tools Management are served, including tools added to a server later.",
+    "toolPolicyAllowlistHelp": "Only tools switched on in Tools Management are served. New tools stay hidden until switched on.",
+    "toolPolicySwitchLabel": "Allowlist mode",
+    "toolPolicyConfirmTitle": "Switch to allowlist mode?",
+    "toolPolicyConfirmDescription": "Every tool in \"{{name}}\" that is not switched on in Tools Management stops being listed or callable at once, and tools added to its servers later stay hidden until switched on. Switching back to allow all restores them.",
+    "toolPolicyConfirm": "Switch to allowlist",
+    "toolPolicyUpdated": "Tool policy updated",
+    "toolPolicyUpdateFailed": "Failed to update the tool policy"
   },
   "enhancedToolsTable": {
     "toolName": "Nome da Tool",
@@ -197,7 +208,8 @@
     "noToolsFromMetaMCP": "Nenhuma tool encontrada na conexão MetaMCP",
     "fetchToolsError": "Falha ao buscar tools da conexão MetaMCP",
     "metaMCPNotAvailable": "Conexão MetaMCP não disponível, usando atualização do banco de dados",
-    "toolsAutoSaved": "Tools automaticamente descobertas e salvas"
+    "toolsAutoSaved": "Tools automaticamente descobertas e salvas",
+    "server": "server"
   },
   "edit": {
     "title": "Editar Namespace",
@@ -220,5 +232,6 @@
     "updateFailed": "Falha na Atualização",
     "updateFailedDescription": "Falha ao atualizar namespace",
     "unexpectedError": "Ocorreu um erro inesperado"
-  }
+  },
+  "ownershipPublicNote": "Namespaces are shared: every signed-in user can see them, and administrators manage them."
 }

@@ -9,7 +9,13 @@ import {
 } from "@repo/zod-types";
 import { z } from "zod";
 
-import { protectedProcedure, router } from "../../trpc";
+import {
+  adminProcedure,
+  type AuditActor,
+  auditActor,
+  protectedProcedure,
+  router,
+} from "../../trpc";
 
 // Define the endpoints router with procedure definitions
 // The actual implementation will be provided by the backend
@@ -19,10 +25,14 @@ export const createEndpointsRouter = (
     create: (
       input: z.infer<typeof CreateEndpointRequestSchema>,
       userId: string,
+      actor: AuditActor,
     ) => Promise<z.infer<typeof CreateEndpointResponseSchema>>;
     list: (
       userId: string,
     ) => Promise<z.infer<typeof ListEndpointsResponseSchema>>;
+    // Every endpoint regardless of owner; reached only through the
+    // admin-gated `listAll` procedure below.
+    listAll: () => Promise<z.infer<typeof ListEndpointsResponseSchema>>;
     get: (
       input: {
         uuid: string;
@@ -34,10 +44,12 @@ export const createEndpointsRouter = (
         uuid: string;
       },
       userId: string,
+      actor: AuditActor,
     ) => Promise<z.infer<typeof DeleteEndpointResponseSchema>>;
     update: (
       input: z.infer<typeof UpdateEndpointRequestSchema>,
       userId: string,
+      actor: AuditActor,
     ) => Promise<z.infer<typeof UpdateEndpointResponseSchema>>;
   },
 ) => {
@@ -49,6 +61,17 @@ export const createEndpointsRouter = (
         return await implementations.list(ctx.user.id);
       }),
 
+    // Admin only: every endpoint, whoever owns it, each row carrying its
+    // owner in `user_id` (null = public). Separate from `list` for the reason
+    // given on `namespaces.listAll`: `list` keeps its public-plus-own result
+    // for every caller, so a consumer matching rows by name never meets a
+    // row it could not see before.
+    listAll: adminProcedure
+      .output(ListEndpointsResponseSchema)
+      .query(async () => {
+        return await implementations.listAll();
+      }),
+
     // Protected: Get single endpoint by UUID
     get: protectedProcedure
       .input(z.object({ uuid: z.string() }))
@@ -57,28 +80,40 @@ export const createEndpointsRouter = (
         return await implementations.get(input, ctx.user.id);
       }),
 
-    // Protected: Create endpoint
-    create: protectedProcedure
+    // Admin only: Create endpoint
+    create: adminProcedure
       .input(CreateEndpointRequestSchema)
       .output(CreateEndpointResponseSchema)
       .mutation(async ({ input, ctx }) => {
-        return await implementations.create(input, ctx.user.id);
+        return await implementations.create(
+          input,
+          ctx.user.id,
+          auditActor(ctx),
+        );
       }),
 
-    // Protected: Delete endpoint
-    delete: protectedProcedure
+    // Admin only: Delete endpoint
+    delete: adminProcedure
       .input(z.object({ uuid: z.string() }))
       .output(DeleteEndpointResponseSchema)
       .mutation(async ({ input, ctx }) => {
-        return await implementations.delete(input, ctx.user.id);
+        return await implementations.delete(
+          input,
+          ctx.user.id,
+          auditActor(ctx),
+        );
       }),
 
-    // Protected: Update endpoint
-    update: protectedProcedure
+    // Admin only: Update endpoint
+    update: adminProcedure
       .input(UpdateEndpointRequestSchema)
       .output(UpdateEndpointResponseSchema)
       .mutation(async ({ input, ctx }) => {
-        return await implementations.update(input, ctx.user.id);
+        return await implementations.update(
+          input,
+          ctx.user.id,
+          auditActor(ctx),
+        );
       }),
   });
 };

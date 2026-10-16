@@ -146,7 +146,6 @@ export default function McpServerDetailPage({
     command: server?.command || "",
     args: server?.args?.join(" ") || "",
     url: server?.url || "",
-    env: server?.env || {},
     bearerToken: server?.bearerToken || undefined,
     onNotification: (notification) => {
       console.log("MCP Notification:", notification);
@@ -156,8 +155,8 @@ export default function McpServerDetailPage({
     },
     enabled: Boolean(
       server &&
-      !isLoading &&
-      server.error_status !== McpServerErrorStatusEnum.enum.ERROR,
+        !isLoading &&
+        server.error_status !== McpServerErrorStatusEnum.enum.ERROR,
     ),
   });
 

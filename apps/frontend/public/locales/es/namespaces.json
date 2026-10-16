@@ -91,7 +91,18 @@
     "toggleTooFast": "Cambio Demasiado Rápido",
     "toggleTooFastDescription": "Por favor, espere antes de cambiar nuevamente para permitir que la sesión se inicialice correctamente.",
     "forceReset": "Restablecimiento Forzado",
-    "anErrorOccurredWhileDeleting": "Ocurrió un error al eliminar el namespace"
+    "anErrorOccurredWhileDeleting": "Ocurrió un error al eliminar el namespace",
+    "toolPolicy": "Tool Policy",
+    "toolPolicyAllowAll": "Allow all",
+    "toolPolicyAllowlist": "Allowlist",
+    "toolPolicyAllowAllHelp": "Tools with no row in Tools Management are served, including tools added to a server later.",
+    "toolPolicyAllowlistHelp": "Only tools switched on in Tools Management are served. New tools stay hidden until switched on.",
+    "toolPolicySwitchLabel": "Allowlist mode",
+    "toolPolicyConfirmTitle": "Switch to allowlist mode?",
+    "toolPolicyConfirmDescription": "Every tool in \"{{name}}\" that is not switched on in Tools Management stops being listed or callable at once, and tools added to its servers later stay hidden until switched on. Switching back to allow all restores them.",
+    "toolPolicyConfirm": "Switch to allowlist",
+    "toolPolicyUpdated": "Tool policy updated",
+    "toolPolicyUpdateFailed": "Failed to update the tool policy"
   },
   "enhancedToolsTable": {
     "toolName": "Nombre de la Tool",
@@ -197,7 +208,8 @@
     "noToolsFromMetaMCP": "No se encontraron tools en la conexión MetaMCP",
     "fetchToolsError": "Error al obtener tools de la conexión MetaMCP",
     "metaMCPNotAvailable": "Conexión MetaMCP no disponible, usando actualización de base de datos",
-    "toolsAutoSaved": "Tools descubiertas y guardadas automáticamente"
+    "toolsAutoSaved": "Tools descubiertas y guardadas automáticamente",
+    "server": "server"
   },
   "edit": {
     "title": "Editar Namespace",
@@ -220,5 +232,6 @@
     "updateFailed": "Error en la Actualización",
     "updateFailedDescription": "Error al actualizar namespace",
     "unexpectedError": "Ocurrió un error inesperado"
-  }
+  },
+  "ownershipPublicNote": "Namespaces are shared: every signed-in user can see them, and administrators manage them."
 }

@@ -25,8 +25,10 @@ export default defineConfig({
     "helmet",
     "nanoid",
     "pg",
-    "shell-quote",
     "spawn-rx",
+    // Externalised like every other runtime dependency: undici ships a WASM
+    // HTTP parser, which must load from the real package rather than a bundle.
+    "undici",
     "zod",
   ],
 });

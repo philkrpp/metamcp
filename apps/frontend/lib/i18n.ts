@@ -22,11 +22,12 @@ export type Translations = {
   namespaces: Record<string, TranslationValue>;
   endpoints: Record<string, TranslationValue>;
   "api-keys": Record<string, TranslationValue>;
+  "oauth-clients": Record<string, TranslationValue>;
+  access: Record<string, TranslationValue>;
   settings: Record<string, TranslationValue>;
   search: Record<string, TranslationValue>;
   inspector: Record<string, TranslationValue>;
   logs: Record<string, TranslationValue>;
-  "audit-logs": Record<string, TranslationValue>;
   validation: Record<string, TranslationValue>;
 };
 
@@ -71,12 +72,13 @@ export async function loadTranslations(
         .default,
       endpoints: (await import("../public/locales/en/endpoints.json")).default,
       "api-keys": (await import("../public/locales/en/api-keys.json")).default,
+      "oauth-clients": (await import("../public/locales/en/oauth-clients.json"))
+        .default,
+      access: (await import("../public/locales/en/access.json")).default,
       settings: (await import("../public/locales/en/settings.json")).default,
       search: (await import("../public/locales/en/search.json")).default,
       inspector: (await import("../public/locales/en/inspector.json")).default,
       logs: (await import("../public/locales/en/logs.json")).default,
-      "audit-logs": (await import("../public/locales/en/audit-logs.json"))
-        .default,
       validation: (await import("../public/locales/en/validation.json"))
         .default,
     };
@@ -90,11 +92,12 @@ export async function loadTranslations(
       namespacesZh,
       endpointsZh,
       apiKeysZh,
+      oauthClientsZh,
+      accessZh,
       settingsZh,
       searchZh,
       inspectorZh,
       logsZh,
-      auditLogsZh,
       validationZh,
     ] = await Promise.all([
       import("../public/locales/zh/common.json").catch(() => ({ default: {} })),
@@ -114,6 +117,19 @@ export async function loadTranslations(
       import("../public/locales/zh/api-keys.json").catch(() => ({
         default: {},
       })),
+      import("../public/locales/zh/oauth-clients.json").catch(() => ({
+        default: {},
+      })),
+      // The zh access.json is an intentionally EMPTY object, not a missing
+      // file: these imports are resolved statically at build time, so a file
+      // that does not exist fails the build rather than falling into the
+      // .catch(). Empty means the English strings below win the merge — an
+      // honest untranslated fallback instead of a machine-translated one on a
+      // security surface. Filling the file in translates the page with no
+      // further wiring.
+      import("../public/locales/zh/access.json").catch(() => ({
+        default: {},
+      })),
       import("../public/locales/zh/settings.json").catch(() => ({
         default: {},
       })),
@@ -122,9 +138,6 @@ export async function loadTranslations(
         default: {},
       })),
       import("../public/locales/zh/logs.json").catch(() => ({ default: {} })),
-      import("../public/locales/zh/audit-logs.json").catch(() => ({
-        default: {},
-      })),
       import("../public/locales/zh/validation.json").catch(() => ({
         default: {},
       })),
@@ -141,14 +154,15 @@ export async function loadTranslations(
       namespaces: { ...englishDict.namespaces, ...namespacesZh.default },
       endpoints: { ...englishDict.endpoints, ...endpointsZh.default },
       "api-keys": { ...englishDict["api-keys"], ...apiKeysZh.default },
+      "oauth-clients": {
+        ...englishDict["oauth-clients"],
+        ...oauthClientsZh.default,
+      },
+      access: { ...englishDict.access, ...accessZh.default },
       settings: { ...englishDict.settings, ...settingsZh.default },
       search: { ...englishDict.search, ...searchZh.default },
       inspector: { ...englishDict.inspector, ...inspectorZh.default },
       logs: { ...englishDict.logs, ...logsZh.default },
-      "audit-logs": {
-        ...englishDict["audit-logs"],
-        ...auditLogsZh.default,
-      },
       validation: { ...englishDict.validation, ...validationZh.default },
     };
   } else if (locale === "ko") {
@@ -161,11 +175,12 @@ export async function loadTranslations(
       namespacesKo,
       endpointsKo,
       apiKeysKo,
+      oauthClientsKo,
+      accessKo,
       settingsKo,
       searchKo,
       inspectorKo,
       logsKo,
-      auditLogsKo,
       validationKo,
     ] = await Promise.all([
       import("../public/locales/ko/common.json").catch(() => ({ default: {} })),
@@ -185,6 +200,19 @@ export async function loadTranslations(
       import("../public/locales/ko/api-keys.json").catch(() => ({
         default: {},
       })),
+      import("../public/locales/ko/oauth-clients.json").catch(() => ({
+        default: {},
+      })),
+      // The ko access.json is an intentionally EMPTY object, not a missing
+      // file: these imports are resolved statically at build time, so a file
+      // that does not exist fails the build rather than falling into the
+      // .catch(). Empty means the English strings below win the merge — an
+      // honest untranslated fallback instead of a machine-translated one on a
+      // security surface. Filling the file in translates the page with no
+      // further wiring.
+      import("../public/locales/ko/access.json").catch(() => ({
+        default: {},
+      })),
       import("../public/locales/ko/settings.json").catch(() => ({
         default: {},
       })),
@@ -193,9 +221,6 @@ export async function loadTranslations(
         default: {},
       })),
       import("../public/locales/ko/logs.json").catch(() => ({ default: {} })),
-      import("../public/locales/ko/audit-logs.json").catch(() => ({
-        default: {},
-      })),
       import("../public/locales/ko/validation.json").catch(() => ({
         default: {},
       })),
@@ -212,14 +237,15 @@ export async function loadTranslations(
       namespaces: { ...englishDict.namespaces, ...namespacesKo.default },
       endpoints: { ...englishDict.endpoints, ...endpointsKo.default },
       "api-keys": { ...englishDict["api-keys"], ...apiKeysKo.default },
+      "oauth-clients": {
+        ...englishDict["oauth-clients"],
+        ...oauthClientsKo.default,
+      },
+      access: { ...englishDict.access, ...accessKo.default },
       settings: { ...englishDict.settings, ...settingsKo.default },
       search: { ...englishDict.search, ...searchKo.default },
       inspector: { ...englishDict.inspector, ...inspectorKo.default },
       logs: { ...englishDict.logs, ...logsKo.default },
-      "audit-logs": {
-        ...englishDict["audit-logs"],
-        ...auditLogsKo.default,
-      },
       validation: { ...englishDict.validation, ...validationKo.default },
     };
   } else if (locale === "pt") {
@@ -279,12 +305,14 @@ export async function loadTranslations(
       namespaces: { ...englishDict.namespaces, ...namespacesPt.default },
       endpoints: { ...englishDict.endpoints, ...endpointsPt.default },
       "api-keys": { ...englishDict["api-keys"], ...apiKeysPt.default },
+      // No pt/es translation files yet for these namespaces: English fallback.
+      "oauth-clients": { ...englishDict["oauth-clients"] },
+      access: { ...englishDict.access },
       settings: { ...englishDict.settings, ...settingsPt.default },
       search: { ...englishDict.search, ...searchPt.default },
       inspector: { ...englishDict.inspector, ...inspectorPt.default },
       logs: { ...englishDict.logs, ...logsPt.default },
       validation: { ...englishDict.validation, ...validationPt.default },
-      "audit-logs": { ...englishDict["audit-logs"] },
     };
   } else if (locale === "es") {
     // Load Spanish translations with fallback to English
@@ -343,12 +371,14 @@ export async function loadTranslations(
       namespaces: { ...englishDict.namespaces, ...namespacesEs.default },
       endpoints: { ...englishDict.endpoints, ...endpointsEs.default },
       "api-keys": { ...englishDict["api-keys"], ...apiKeysEs.default },
+      // No pt/es translation files yet for these namespaces: English fallback.
+      "oauth-clients": { ...englishDict["oauth-clients"] },
+      access: { ...englishDict.access },
       settings: { ...englishDict.settings, ...settingsEs.default },
       search: { ...englishDict.search, ...searchEs.default },
       inspector: { ...englishDict.inspector, ...inspectorEs.default },
       logs: { ...englishDict.logs, ...logsEs.default },
       validation: { ...englishDict.validation, ...validationEs.default },
-      "audit-logs": { ...englishDict["audit-logs"] },
     };
   } else {
     // Fallback to English for unsupported locales

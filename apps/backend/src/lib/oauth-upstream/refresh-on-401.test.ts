@@ -86,6 +86,50 @@ describe("tryRefreshUpstreamTokens", () => {
     });
   });
 
+  it("keeps the stored tokens' issuer stamp on the refreshed tokens", async () => {
+    // MCP SDK 1.31 binds stored tokens to an authorization server via
+    // `issuer`; the frontend provider withholds an unstamped refresh token.
+    // A refresh is answered by the same authorization server, so the stamp
+    // carries over, and an `issuer` in the response itself is ignored.
+    const { tryRefreshUpstreamTokens, findByMcpServerUuid, upsert } =
+      await loadModule();
+
+    findByMcpServerUuid.mockResolvedValue({
+      mcp_server_uuid: SERVER.uuid,
+      client_information: { client_id: "c1" },
+      tokens: {
+        access_token: "OLD",
+        token_type: "Bearer",
+        refresh_token: "RT_old",
+        issuer: "https://auth.example.com/",
+      },
+      code_verifier: null,
+    });
+    upsert.mockResolvedValue({});
+
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      const urlStr = typeof url === "string" ? url : (url as URL).toString();
+      if (urlStr.includes("/.well-known/"))
+        return new Response("nope", { status: 404 });
+      return jsonResponse(200, {
+        access_token: "NEW",
+        token_type: "Bearer",
+        issuer: "https://evil.example/",
+      });
+    });
+
+    const result = await tryRefreshUpstreamTokens(SERVER);
+
+    expect(result.status).toBe("refreshed");
+    expect(upsert).toHaveBeenCalledWith({
+      mcp_server_uuid: SERVER.uuid,
+      tokens: expect.objectContaining({
+        access_token: "NEW",
+        issuer: "https://auth.example.com/",
+      }),
+    });
+  });
+
   it("returns no_session when no oauth_sessions row exists", async () => {
     const { tryRefreshUpstreamTokens, findByMcpServerUuid, upsert } =
       await loadModule();

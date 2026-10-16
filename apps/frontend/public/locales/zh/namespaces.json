@@ -10,6 +10,7 @@
   "ownership": "所有权",
   "forMyself": "仅自己（私有）",
   "everyone": "所有人（公开）",
+  "ownershipPublicNote": "命名空间是共享的：所有已登录用户都可以查看，并由管理员管理。",
   "selectServers": "选择 MCP 服务器",
   "selectServersDescription": "选择要包含在此命名空间中的 MCP 服务器",
   "noServersAvailable": "没有可用的 MCP 服务器",
@@ -84,7 +85,25 @@
     "connect": "连接",
     "connectingToMetaMcp": "正在连接到 MetaMCP...",
     "connectToMetaMcpToEnable": "连接到 MetaMCP 以启用增强的工具管理",
-    "anErrorOccurredWhileDeleting": "删除命名空间时发生错误"
+    "anErrorOccurredWhileDeleting": "删除命名空间时发生错误",
+    "toolPolicy": "工具策略",
+    "toolPolicyAllowAll": "全部允许",
+    "toolPolicyAllowlist": "允许列表",
+    "toolPolicyAllowAllHelp": "在工具管理中没有记录的工具也会提供，包括之后添加到服务器的工具。",
+    "toolPolicyAllowlistHelp": "仅提供在工具管理中已启用的工具。新工具在启用之前保持隐藏。",
+    "toolPolicySwitchLabel": "允许列表模式",
+    "toolPolicyConfirmTitle": "切换到允许列表模式？",
+    "toolPolicyConfirmDescription": "\"{{name}}\" 中所有未在工具管理中启用的工具将立即不再列出或可调用，之后添加到其服务器的工具在启用之前也保持隐藏。切换回全部允许即可恢复。",
+    "toolPolicyConfirm": "切换到允许列表",
+    "toolPolicyUpdated": "工具策略已更新",
+    "toolPolicyUpdateFailed": "更新工具策略失败",
+    "initializing": "Initializing...",
+    "initializingSession": "Initializing session...",
+    "sessionInitializationTimeout": "Session Initialization Timeout",
+    "sessionInitializationTimeoutDescription": "Session initialization took too long and was automatically reset. You can try again or use the force reset button.",
+    "toggleTooFast": "Toggle Too Fast",
+    "toggleTooFastDescription": "Please wait before toggling again to allow the session to initialize properly.",
+    "forceReset": "Force Reset"
   },
   "enhancedToolsTable": {
     "toolName": "工具名称",
@@ -169,10 +188,13 @@
     "toggleStatus": "切换 {{name}} 状态",
     "errorStatus": "错误状态",
     "error": "错误",
-    "noError": "无错误"
+    "noError": "无错误",
+    "toggleTooFast": "Toggle Too Fast",
+    "toggleTooFastDescription": "Please wait before toggling this server again to prevent conflicts."
   },
   "toolManagement": {
     "toolsOverview": "工具概览：",
+    "server": "服务器",
     "servers": "服务器",
     "active": "活跃",
     "fromMetaMCP": "来自 MetaMCP",
@@ -187,7 +209,8 @@
     "noToolsFromMetaMCP": "MetaMCP 连接中未找到工具",
     "fetchToolsError": "从 MetaMCP 连接获取工具失败",
     "metaMCPNotAvailable": "MetaMCP 连接不可用，回退到数据库刷新",
-    "toolsAutoSaved": "工具已自动发现并保存"
+    "toolsAutoSaved": "工具已自动发现并保存",
+    "initializing": "Initializing..."
   },
   "edit": {
     "title": "编辑命名空间",

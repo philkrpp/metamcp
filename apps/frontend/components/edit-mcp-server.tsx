@@ -344,11 +344,11 @@ export function EditMcpServer({
       const dirty = editForm.formState.dirtyFields as Record<string, unknown>;
       const oauthSectionTouched = Boolean(
         dirty.oauth_client_id ||
-        dirty.oauth_client_secret ||
-        dirty.oauth_authorization_endpoint ||
-        dirty.oauth_token_endpoint ||
-        dirty.oauth_scope ||
-        dirty.oauth_token_endpoint_auth_method,
+          dirty.oauth_client_secret ||
+          dirty.oauth_authorization_endpoint ||
+          dirty.oauth_token_endpoint ||
+          dirty.oauth_scope ||
+          dirty.oauth_token_endpoint_auth_method,
       );
       const oauthClientInfo =
         isHttpServer && oauthSectionTouched
@@ -659,11 +659,11 @@ export function EditMcpServer({
                 idPrefix="edit"
                 defaultOpen={Boolean(
                   existingOauthQuery.data?.success &&
-                  (
-                    existingOauthQuery.data.data.client_information as {
-                      client_id?: string;
-                    } | null
-                  )?.client_id,
+                    (
+                      existingOauthQuery.data.data.client_information as {
+                        client_id?: string;
+                      } | null
+                    )?.client_id,
                 )}
               />
             </>

@@ -27,6 +27,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { PageHeader } from "@/components/ui/page-header";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { useTranslations } from "@/hooks/useTranslations";
@@ -60,18 +61,32 @@ export default function EndpointsPage() {
     onSuccess: (data) => {
       // Check if the operation was actually successful
       if (data.success) {
-        toast.success(t("endpoints:endpointCreated"), {
-          description: t("endpoints:endpointCreatedDescription", {
-            name: form.getValues().name,
-          }),
-        });
+        // A `warning` means PARTIAL success: the endpoint exists but a
+        // companion step (the auto-generated MCP server) did not complete.
+        // Umbrella: shown instead of the success toast rather than alongside
+        // it — a green "created" toast covering a server that was silently
+        // not created is how the caller ends up hunting for a row that never
+        // existed. The text is the server's, since it names the actual cause.
+        if (data.warning) {
+          toast.warning(t("endpoints:endpointCreated"), {
+            description: data.warning,
+          });
+        } else {
+          toast.success(t("endpoints:endpointCreated"), {
+            description: t("endpoints:endpointCreatedDescription", {
+              name: form.getValues().name,
+            }),
+          });
+        }
         setCreateOpen(false);
         form.reset({
           name: "",
           description: "",
           namespaceUuid: "",
           enableApiKeyAuth: true,
-          enableMaxRate: false,
+          requireScopedApiKey: false,
+          restricted: false,
+          enableMaxRate: true,
           enableClientMaxRate: false,
           maxRate: undefined,
           maxRateSeconds: undefined,
@@ -79,11 +94,11 @@ export default function EndpointsPage() {
           clientMaxRateSeconds: undefined,
           clientMaxRateStrategy: "ip",
           clientMaxRateStrategyKey: "",
-          enableOauth: false,
+          enableOauth: true,
           useQueryParamAuth: false,
           enableMetamcpAdminTools: false,
-          createMcpServer: true,
-          user_id: undefined, // Default to "For myself" (Private)
+          createMcpServer: false, // Umbrella: default OFF - the loopback <endpoint>-endpoint server row is noise for our expose-to-external-clients pattern
+          user_id: undefined, // default PRIVATE (owned by the creating admin); the ownership selector below opts in to public (Everyone)
         });
         setSelectedNamespaceUuid("");
         setSelectedNamespaceName("");
@@ -116,7 +131,7 @@ export default function EndpointsPage() {
       name: "",
       description: "",
       namespaceUuid: "",
-      enableMaxRate: false,
+      enableMaxRate: true,
       enableClientMaxRate: false,
       maxRate: undefined,
       maxRateSeconds: undefined,
@@ -125,11 +140,13 @@ export default function EndpointsPage() {
       clientMaxRateStrategy: "ip",
       clientMaxRateStrategyKey: "",
       enableApiKeyAuth: true,
-      enableOauth: false,
+      requireScopedApiKey: false,
+      restricted: false,
+      enableOauth: true,
       useQueryParamAuth: false,
       enableMetamcpAdminTools: false,
-      createMcpServer: true,
-      user_id: undefined, // Default to "For myself" (Private)
+      createMcpServer: false, // Umbrella: default OFF - the loopback <endpoint>-endpoint server row is noise for our expose-to-external-clients pattern
+      user_id: undefined, // default PRIVATE (owned by the creating admin); the ownership selector below opts in to public (Everyone)
     },
   });
 
@@ -142,6 +159,8 @@ export default function EndpointsPage() {
         description: data.description,
         namespaceUuid: data.namespaceUuid,
         enableApiKeyAuth: data.enableApiKeyAuth,
+        requireScopedApiKey: data.requireScopedApiKey,
+        restricted: data.restricted,
         enableMaxRate: data.enableMaxRate,
         enableClientMaxRate: data.enableClientMaxRate,
         maxRate: data.maxRate,
@@ -188,7 +207,9 @@ export default function EndpointsPage() {
       description: "",
       namespaceUuid: "",
       enableApiKeyAuth: true,
-      enableMaxRate: false,
+      requireScopedApiKey: false,
+      restricted: false,
+      enableMaxRate: true,
       enableClientMaxRate: false,
       maxRate: undefined,
       maxRateSeconds: undefined,
@@ -196,30 +217,22 @@ export default function EndpointsPage() {
       clientMaxRateSeconds: undefined,
       clientMaxRateStrategy: "ip",
       clientMaxRateStrategyKey: "",
-      enableOauth: false,
+      enableOauth: true,
       useQueryParamAuth: false,
-      createMcpServer: true,
-      user_id: undefined, // Default to "For myself" (Private)
+      createMcpServer: false, // Umbrella: default OFF - the loopback <endpoint>-endpoint server row is noise for our expose-to-external-clients pattern
+      user_id: undefined, // default PRIVATE (owned by the creating admin); the ownership selector below opts in to public (Everyone)
     });
     setSelectedNamespaceUuid("");
     setSelectedNamespaceName("");
   };
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <Link className="h-8 w-8 text-primary" />
-          <div>
-            <h1 className="text-3xl font-bold tracking-tight">
-              {t("endpoints:title")}
-            </h1>
-            <p className="text-muted-foreground">
-              {t("endpoints:description")}
-            </p>
-          </div>
-        </div>
-        <div className="flex gap-2">
+    <div className="space-y-6 min-w-0">
+      <PageHeader
+        icon={<Link className="h-8 w-8 text-primary" />}
+        title={t("endpoints:title")}
+        description={t("endpoints:description")}
+        actions={
           <Dialog open={createOpen} onOpenChange={setCreateOpen}>
             <DialogTrigger asChild>
               <Button>
@@ -387,9 +400,14 @@ export default function EndpointsPage() {
                     </div>
                     <Switch
                       checked={form.watch("enableMaxRate")}
-                      onCheckedChange={(checked) =>
-                        form.setValue("enableMaxRate", checked)
-                      }
+                      onCheckedChange={(checked) => {
+                        form.setValue("enableMaxRate", checked);
+                        if (!checked) {
+                          form.setValue("maxRate", undefined);
+                          form.setValue("maxRateSeconds", undefined);
+                          form.clearErrors(["maxRate", "maxRateSeconds"]);
+                        }
+                      }}
                       disabled={isSubmitting}
                     />
                   </div>
@@ -454,9 +472,17 @@ export default function EndpointsPage() {
                     </div>
                     <Switch
                       checked={form.watch("enableClientMaxRate")}
-                      onCheckedChange={(checked) =>
-                        form.setValue("enableClientMaxRate", checked)
-                      }
+                      onCheckedChange={(checked) => {
+                        form.setValue("enableClientMaxRate", checked);
+                        if (!checked) {
+                          form.setValue("clientMaxRate", undefined);
+                          form.setValue("clientMaxRateSeconds", undefined);
+                          form.clearErrors([
+                            "clientMaxRate",
+                            "clientMaxRateSeconds",
+                          ]);
+                        }
+                      }}
                       disabled={isSubmitting}
                     />
                   </div>
@@ -623,6 +649,35 @@ export default function EndpointsPage() {
                     />
                   </div>
 
+                  {/* Require endpoint-scoped keys (opt out of legacy
+                      gateway-wide keys on this endpoint) */}
+                  {form.watch("enableApiKeyAuth") && (
+                    <div className="flex items-center justify-between">
+                      <div className="space-y-0.5">
+                        <label className="text-sm font-medium">
+                          {t("endpoints:requireScopedApiKey")}
+                        </label>
+                        <p className="text-xs text-muted-foreground">
+                          {t("endpoints:requireScopedApiKeyDescription")}
+                        </p>
+                      </div>
+                      <Switch
+                        checked={
+                          form.watch("requireScopedApiKey") ||
+                          form.watch("restricted")
+                        }
+                        onCheckedChange={(checked) =>
+                          form.setValue("requireScopedApiKey", checked)
+                        }
+                        // Locked on while the endpoint is restricted: a
+                        // restricted endpoint must reject unscoped keys, so the
+                        // server pairs the two and the form shows it forced
+                        // rather than a value the operator can silently clear.
+                        disabled={isSubmitting || form.watch("restricted")}
+                      />
+                    </div>
+                  )}
+
                   {/* Query Parameter Auth */}
                   {form.watch("enableApiKeyAuth") && (
                     <div className="flex items-center justify-between">
@@ -669,6 +724,34 @@ export default function EndpointsPage() {
                       disabled={isSubmitting}
                     />
                   </div>
+
+                  {/* Restrict to access groups (OAuth plane). Shown only when
+                      OAuth is on, since the gate governs OAuth callers. Turning
+                      it on also forces endpoint-scoped API keys on: the two
+                      controls only confine an endpoint together, so the form
+                      pairs them exactly as the server does on create. */}
+                  {form.watch("enableOauth") && (
+                    <div className="flex items-center justify-between">
+                      <div className="space-y-0.5">
+                        <label className="text-sm font-medium">
+                          {t("endpoints:restrictedLabel")}
+                        </label>
+                        <p className="text-xs text-muted-foreground">
+                          {t("endpoints:restrictedDescription")}
+                        </p>
+                      </div>
+                      <Switch
+                        checked={form.watch("restricted")}
+                        onCheckedChange={(checked) => {
+                          form.setValue("restricted", checked);
+                          if (checked) {
+                            form.setValue("requireScopedApiKey", true);
+                          }
+                        }}
+                        disabled={isSubmitting}
+                      />
+                    </div>
+                  )}
 
                   {/* OAuth HTTPS Warning */}
                   {form.watch("enableOauth") && (
@@ -747,8 +830,8 @@ export default function EndpointsPage() {
               </form>
             </DialogContent>
           </Dialog>
-        </div>
-      </div>
+        }
+      />
 
       <EndpointsList />
     </div>

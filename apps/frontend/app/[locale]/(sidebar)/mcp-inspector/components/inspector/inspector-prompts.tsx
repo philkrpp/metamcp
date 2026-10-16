@@ -223,6 +223,9 @@ export function InspectorPrompts({
               <div className="font-mono text-xs break-all">
                 URI: {message.content.resource?.uri}
               </div>
+              {/* SDK 1.29 types resource as a TextResourceContents |
+                  BlobResourceContents discriminated union; narrow with `in`
+                  before reading text/blob (was a merged shape under 1.16). */}
               {message.content.resource &&
               "text" in message.content.resource &&
               message.content.resource.text ? (

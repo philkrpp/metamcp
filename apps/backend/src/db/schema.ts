@@ -1,47 +1,46 @@
 import { OAuthClientInformation } from "@modelcontextprotocol/sdk/shared/auth.js";
 import {
+  MCP_SERVER_ERROR_STATUSES,
+  MCP_SERVER_STATUSES,
+  MCP_SERVER_TYPES,
   McpServerErrorStatusEnum,
   McpServerStatusEnum,
   McpServerTypeEnum,
+  type NamespaceToolPolicy,
+  type OAuthClientRegistrationSource,
   UpstreamTokenResponse,
 } from "@repo/zod-types";
 import { sql } from "drizzle-orm";
 import {
+  type AnyPgColumn,
   boolean,
+  check,
   index,
   integer,
   jsonb,
   pgEnum,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   unique,
   uuid,
 } from "drizzle-orm/pg-core";
 
-// zod v4 types `ZodEnum.options` as a plain array, but drizzle's pgEnum requires
-// a non-empty tuple. Re-assert the shape while preserving the literal union so
-// the generated columns keep their narrow enum types.
-function toEnumTuple<T extends string>(options: readonly T[]): [T, ...T[]] {
-  return options as unknown as [T, ...T[]];
-}
+import type { ArgsShape } from "../lib/metamcp/metamcp-middleware/audit-args-shape";
 
-export const mcpServerTypeEnum = pgEnum(
-  "mcp_server_type",
-  toEnumTuple(McpServerTypeEnum.options),
-);
+// Build the drizzle enums from the shared literal tuples (not
+// `SomeEnum.options`, which zod 4 widens to string[] and breaks pgEnum's
+// literal-union inference — see MCP_SERVER_TYPES in @repo/zod-types).
+export const mcpServerTypeEnum = pgEnum("mcp_server_type", MCP_SERVER_TYPES);
 export const mcpServerStatusEnum = pgEnum(
   "mcp_server_status",
-  toEnumTuple(McpServerStatusEnum.options),
+  MCP_SERVER_STATUSES,
 );
 export const mcpServerErrorStatusEnum = pgEnum(
   "mcp_server_error_status",
-  toEnumTuple(McpServerErrorStatusEnum.options),
+  MCP_SERVER_ERROR_STATUSES,
 );
-export const mcpRequestAuditStatusEnum = pgEnum("mcp_request_audit_status", [
-  "SUCCESS",
-  "ERROR",
-]);
 
 export const mcpServersTable = pgTable(
   "mcp_servers",
@@ -68,11 +67,22 @@ export const mcpServersTable = pgTable(
     created_at: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
+    // Upstream credential the gateway presents when it connects to this server
+    // (auto-minted for UI-created endpoints; operator-supplied for manual
+    // servers). Stored ENCRYPTED at rest as an `enc:v1:` AES-256-GCM envelope
+    // reusing the M365 token KEK (see lib/metamcp/server-bearer-crypto.ts): the
+    // value must stay recoverable (client.ts reads it back to build the
+    // upstream Authorization header), so it is encrypted rather than hashed.
+    // Ciphertext lives in this same text column, no schema change, and a
+    // boot-time converge encrypts any legacy plaintext row once. Serializers
+    // never return this value to any client.
     bearerToken: text("bearer_token"),
     headers: jsonb("headers")
       .$type<{ [key: string]: string }>()
       .notNull()
       .default(sql`'{}'::jsonb`),
+    // Per-server client header forwarding: maps incoming client header name
+    // -> upstream header name (see lib/metamcp/header-forwarding.ts).
     forward_headers: jsonb("forward_headers")
       .$type<{ [key: string]: string }>()
       .notNull()
@@ -175,6 +185,41 @@ export const usersTable = pgTable("users", {
   email: text("email").notNull().unique(),
   emailVerified: boolean("email_verified").notNull().default(false),
   image: text("image"),
+  // RBAC role: 'admin' | 'member'. Gates administrative tRPC mutations
+  // (MCP-server / namespace / endpoint create-update-delete + all API-key
+  // administration) through `adminProcedure`. NOT NULL default 'member' so
+  // every pre-existing and future account is least-privilege until it is
+  // explicitly promoted — migration 0020 seeds the bootstrap operator account
+  // to 'admin'. Surfaced into the better-auth session via `user.additionalFields`
+  // in auth.ts with `input: false`, so a user cannot self-escalate by
+  // sending a role on sign-up / update.
+  role: text("role").notNull().default("member"),
+  // Account lock (migration 0027). TRUE means this account may not hold a
+  // session: `session.create.before` in auth.ts refuses to mint a new one,
+  // and the tRPC context treats any session it already holds as
+  // unauthenticated rather than waiting out the 30-day expiry. Both halves
+  // are required — either alone leaves a real path in.
+  //
+  // The containment middle tier: revoking access lets the account sign
+  // straight back in, and deleting it destroys the evidence AND cascades into
+  // other users' endpoints and API keys. Disabling locks the account while
+  // preserving it whole.
+  //
+  // Deliberately absent from better-auth `additionalFields`: unlike `role`
+  // (which is surfaced read-only for the session), nothing a client sends may
+  // reach this column, and the enforcement paths re-read it from the database
+  // per request rather than trusting a serialized session.
+  disabled: boolean("disabled").notNull().default(false),
+  disabled_at: timestamp("disabled_at", { withTimezone: true }),
+  // Who locked the account. ON DELETE SET NULL, not CASCADE: deleting the
+  // administrator who disabled an account must never quietly re-enable it or
+  // erase the record of the action.
+  disabled_by: text("disabled_by").references(
+    (): AnyPgColumn => usersTable.id,
+    {
+      onDelete: "set null",
+    },
+  ),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .defaultNow(),
@@ -255,6 +300,16 @@ export const namespacesTable = pgTable(
     user_id: text("user_id").references(() => usersTable.id, {
       onDelete: "cascade",
     }),
+    // How the tool filter treats a tool with NO namespace_tool_mappings row
+    // (migration 0040): 'allow_all' serves it (the original behaviour, and the
+    // default, so the column's arrival changes nothing), 'allowlist' hides it,
+    // so only ACTIVE rows are listed or callable. Text plus the CHECK below
+    // rather than a pgEnum; the reasoning is in the migration. Written only by
+    // the admin-gated `namespaces.setToolPolicy`.
+    tool_policy: text("tool_policy")
+      .$type<NamespaceToolPolicy>()
+      .notNull()
+      .default("allow_all"),
   },
   (table) => [
     index("namespaces_user_id_idx").on(table.user_id),
@@ -263,6 +318,12 @@ export const namespacesTable = pgTable(
     sql`CONSTRAINT namespaces_name_regex_check CHECK (
         name ~ '^[a-zA-Z0-9_-]+$'
       )`,
+    // Mirrored from migration 0040 so a fresh `drizzle-kit generate` re-adds
+    // nothing; refuses any other value even on a row written outside the app.
+    check(
+      "namespaces_tool_policy_check",
+      sql`${table.tool_policy} IN ('allow_all', 'allowlist')`,
+    ),
   ],
 );
 
@@ -291,6 +352,33 @@ export const endpointsTable = pgTable(
     use_query_param_auth: boolean("use_query_param_auth")
       .notNull()
       .default(false),
+    // When true, this endpoint rejects unscoped (endpoint_uuid IS NULL)
+    // API keys: only keys explicitly scoped to THIS endpoint authenticate.
+    // The opt-out from grandfathered gateway-wide keys for sensitive
+    // endpoints. Default false = legacy behavior for existing endpoints.
+    require_scoped_api_key: boolean("require_scoped_api_key")
+      .notNull()
+      .default(false),
+    // Access-group gate for OAUTH callers (migration 0033). When true, an
+    // OAuth-authenticated user reaches this endpoint only if they are an
+    // administrator or belong to a group mapped to it — see
+    // `lib/endpoint-access-control`. This column governs the OAuth plane ONLY.
+    //
+    // The API-key plane is governed by `require_scoped_api_key` above, and the
+    // two are PAIRED by the application layer: every writer that can set
+    // `restricted` true (endpoint create, endpoint update, and the
+    // `setEndpointRestricted` toggle) also forces `require_scoped_api_key` on,
+    // because a restricted endpoint that still admitted unscoped gateway-wide
+    // keys would be confined on the OAuth plane and wide open on the API-key
+    // plane. The pairing is enforced in code rather than as a CHECK constraint
+    // so that pre-existing rows violating it are not rejected at migrate time;
+    // a boot-time warning (see `endpoint-pairing-check`) lists any such rows for
+    // an operator to fix deliberately.
+    //
+    // Default false = today's behaviour, which is what lets this ship without
+    // locking any live connector out while the groups are still being drawn up.
+    restricted: boolean("restricted").notNull().default(false),
+    // Exposes the MetaMCP admin tools (lib/admin-mcp) on this endpoint.
     enable_metamcp_admin_tools: boolean("enable_metamcp_admin_tools")
       .notNull()
       .default(false),
@@ -397,25 +485,139 @@ export const apiKeysTable = pgTable(
   {
     uuid: uuid("uuid").primaryKey().defaultRandom(),
     name: text("name").notNull(),
-    key: text("key").notNull().unique(),
+    // At-rest form of the credential (migration 0034). The key itself is NOT
+    // stored: this is the unsalted lowercase-hex sha256 of it, written only
+    // through lib/api-key-hash.ts's hashApiKey() so the mint paths and the
+    // authentication lookup can never disagree about the encoding. Unique for
+    // the same reason the plaintext column was — two rows must not share a
+    // credential, or a lookup cannot say which scope and which acts-as
+    // identity authenticated the request. The unique constraint also builds
+    // the btree the auth lookup uses, so there is no separate index here.
+    key_hash: text("key_hash").notNull().unique(),
+    // The key's last 4 characters — the only part of the secret kept in
+    // readable form. Enough for a human holding the key to recognise its row
+    // in a list (the serializer renders it as the key_prefix), useless to
+    // anyone who is not.
+    last4: text("last4").notNull(),
     user_id: text("user_id").references(() => usersTable.id, {
+      onDelete: "cascade",
+    }),
+    // Endpoint scope. Non-NULL binds this key to exactly ONE endpoint —
+    // checkApiKeyAccess denies it everywhere else. NULL = legacy/unscoped
+    // (grandfathered): reaches every enable_api_key_auth endpoint, as all
+    // keys did before migration 0023. New keys must name an endpoint or pass
+    // the explicit all_endpoints escape hatch (enforced in the tRPC create
+    // path); NULL can no longer be reached silently through the app. ON
+    // DELETE CASCADE: a key bound to a deleted endpoint is revoked with it.
+    endpoint_uuid: uuid("endpoint_uuid").references(() => endpointsTable.uuid, {
+      onDelete: "cascade",
+    }),
+    // TEMP(api-key-legacy-scope): pre-umbrella n:m confinement flag. TRUE =
+    // the key may only reach the endpoints in api_key_endpoint_access, even
+    // when none are left. Drop together with the shim.
+    restrict_endpoints: boolean("restrict_endpoints").notNull().default(false),
+    // Acts-as identity binding (migration 0024). Non-NULL names the ONE
+    // better-auth user whose delegated m365 identity requests authenticated
+    // by this key exercise (the streamable-http m365 context gate injects
+    // this id; see routers/public-metamcp/streamable-http.ts). NULL = no
+    // identity — the injected fetch fail-closes for this key exactly as it
+    // did before the migration. The binding is admin-set at CREATION only
+    // and immutable through the app (absent from every update schema/path),
+    // and the create path requires it to be paired with a non-null
+    // endpoint_uuid: an identity-bound key must be endpoint-scoped, never
+    // gateway-wide. ON DELETE CASCADE: a key bound to a deleted user dies
+    // with the identity it exercises.
+    acts_as_user_id: text("acts_as_user_id").references(() => usersTable.id, {
       onDelete: "cascade",
     }),
     created_at: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
     is_active: boolean("is_active").notNull().default(true),
-    restrict_endpoints: boolean("restrict_endpoints").notNull().default(false),
+    // Last time this key authenticated a public-endpoint request. Written
+    // fire-and-forget and throttled (only when NULL or >=15 min stale) by
+    // `validateApiKey` so the hot auth path never pays a write per request
+    // and a failed timestamp write can never fail the request. Nullable: a
+    // key that has never authenticated reads NULL. Surfaced only in the
+    // admin cross-user key view — the owner-scoped list does not expose it.
+    last_used_at: timestamp("last_used_at", { withTimezone: true }),
+    // Plane flag (migration 0038). false (the default, and every existing key)
+    // is the DATA plane: authenticates on /metamcp and /mcp-proxy, refused as a
+    // tRPC bearer. true is the CONTROL plane: authenticates AS user_id on /trpc
+    // via Authorization: Bearer, refused on the data plane. The two planes are
+    // non-overlapping and the exclusion is the containment story, a leaked
+    // control-plane key cannot reach the data plane and vice versa. NOT NULL
+    // default false so the deploy is inert and no live key changes behaviour.
+    admin_plane: boolean("admin_plane").notNull().default(false),
+    // IP allowlist (migration 0041). NULL = the key has no list of its own and
+    // follows the GLOBAL policy (config rows API_KEY_IP_ALLOWED_CIDRS and
+    // API_KEY_IP_POLICY_MODE). Non-NULL (even empty) = the key's own list, and
+    // its own ip_policy_mode applies. See lib/api-key-ip-policy.ts.
+    allowed_cidrs: text("allowed_cidrs").array(),
+    // off | audit | enforce (CHECK below). Read only when allowed_cidrs is
+    // non-NULL. Default 'off' so the deploy is inert.
+    ip_policy_mode: text("ip_policy_mode").notNull().default("off"),
+    // CF-Connecting-IP of the last authenticated request, written in the same
+    // throttled stamp as last_used_at. Admin view only.
+    last_used_ip: text("last_used_ip"),
   },
   (table) => [
     index("api_keys_user_id_idx").on(table.user_id),
-    index("api_keys_key_idx").on(table.key),
+    // No index on key_hash: the unique() above already builds one, and the
+    // dropped plaintext column carried a redundant pair (api_keys_key_unique
+    // plus api_keys_key_idx) that migration 0034 deliberately did not
+    // recreate.
     index("api_keys_is_active_idx").on(table.is_active),
+    index("api_keys_endpoint_uuid_idx").on(table.endpoint_uuid),
+    index("api_keys_acts_as_user_id_idx").on(table.acts_as_user_id),
     unique("api_keys_name_per_user_idx").on(table.user_id, table.name),
+    // Structural pairing invariant (migration 0024): an identity binding
+    // REQUIRES a single-endpoint scope. App-layer enforcement (zod + impl +
+    // the middleware's runtime stamp gate) cannot reach rows written outside
+    // the app, so the pairing is also a CHECK — an unscoped-but-bound row
+    // cannot exist.
+    check(
+      "api_keys_acts_as_requires_scope",
+      sql`${table.acts_as_user_id} IS NULL OR ${table.endpoint_uuid} IS NOT NULL`,
+    ),
+    // Plane-separation invariants (migration 0038), mirrored from the SQL so a
+    // fresh `drizzle-kit generate` re-adds nothing. App-layer enforcement (zod
+    // superRefine + impl guard + the two authentication sites) cannot reach a
+    // row written outside the app, so plane separation is also a set of CHECKs.
+    // A control-plane key authenticates AS a user, so it must have one.
+    check(
+      "api_keys_admin_plane_requires_owner",
+      sql`${table.admin_plane} = false OR ${table.user_id} IS NOT NULL`,
+    ),
+    // A control-plane key is not bound to an endpoint (endpoint scope is a
+    // data-plane concept), so it stores endpoint_uuid NULL, which is why the
+    // data plane must refuse admin-plane keys explicitly (a NULL scope reads as
+    // legacy gateway-wide there).
+    check(
+      "api_keys_admin_plane_no_endpoint_scope",
+      sql`${table.admin_plane} = false OR ${table.endpoint_uuid} IS NULL`,
+    ),
+    // A control-plane key carries no acts-as m365 delegated identity. Implied by
+    // the no-endpoint-scope check plus api_keys_acts_as_requires_scope, but
+    // stated explicitly so it survives a change to the acts-as check.
+    check(
+      "api_keys_admin_plane_no_acts_as",
+      sql`${table.admin_plane} = false OR ${table.acts_as_user_id} IS NULL`,
+    ),
+    // IP policy mode (migration 0041): a row written outside the app cannot
+    // carry a mode the evaluator does not know.
+    check(
+      "api_keys_ip_policy_mode_valid",
+      sql`${table.ip_policy_mode} IN ('off', 'audit', 'enforce')`,
+    ),
   ],
 );
 
-// Junction table: which endpoints an API key is allowed to access (when restrict_endpoints=true)
+// TEMP(api-key-legacy-scope): remove once legacy multi-endpoint keys are replaced.
+// Legacy n:m endpoint scoping from the pre-umbrella fork. Umbrella scopes a key
+// via `api_keys.endpoint_uuid` (1:1); this table is only read by the api-key
+// middleware shim so that existing keys with `endpoint_uuid IS NULL` that have
+// rows here stay confined to those endpoints. No new rows are written.
 export const apiKeyEndpointAccessTable = pgTable(
   "api_key_endpoint_access",
   {
@@ -440,84 +642,6 @@ export const apiKeyEndpointAccessTable = pgTable(
   ],
 );
 
-export const mcpRequestAuditLogsTable = pgTable(
-  "mcp_request_audit_logs",
-  {
-    uuid: uuid("uuid").primaryKey().defaultRandom(),
-    endpoint_name: text("endpoint_name").notNull(),
-    namespace_uuid: uuid("namespace_uuid").references(
-      () => namespacesTable.uuid,
-      {
-        onDelete: "set null",
-      },
-    ),
-    session_id: text("session_id").notNull(),
-    auth_method: text("auth_method").notNull(),
-    api_key_uuid: uuid("api_key_uuid").references(() => apiKeysTable.uuid, {
-      onDelete: "set null",
-    }),
-    api_key_user_id: text("api_key_user_id").references(() => usersTable.id, {
-      onDelete: "set null",
-    }),
-    oauth_user_id: text("oauth_user_id").references(() => usersTable.id, {
-      onDelete: "set null",
-    }),
-    mcp_server_uuid: uuid("mcp_server_uuid").references(
-      () => mcpServersTable.uuid,
-      {
-        onDelete: "set null",
-      },
-    ),
-    mcp_server_name: text("mcp_server_name"),
-    tool_name: text("tool_name").notNull(),
-    status: mcpRequestAuditStatusEnum("status").notNull(),
-    duration_ms: integer("duration_ms").notNull(),
-    error_message: text("error_message"),
-    created_at: timestamp("created_at", { withTimezone: true })
-      .notNull()
-      .defaultNow(),
-  },
-  (table) => [
-    index("mcp_request_audit_logs_created_at_idx").on(table.created_at),
-    index("mcp_request_audit_logs_endpoint_name_idx").on(table.endpoint_name),
-    index("mcp_request_audit_logs_namespace_uuid_idx").on(table.namespace_uuid),
-    index("mcp_request_audit_logs_session_id_idx").on(table.session_id),
-    index("mcp_request_audit_logs_api_key_uuid_idx").on(table.api_key_uuid),
-    index("mcp_request_audit_logs_api_key_user_id_idx").on(
-      table.api_key_user_id,
-    ),
-    index("mcp_request_audit_logs_oauth_user_id_idx").on(table.oauth_user_id),
-    index("mcp_request_audit_logs_mcp_server_uuid_idx").on(
-      table.mcp_server_uuid,
-    ),
-    index("mcp_request_audit_logs_mcp_server_name_idx").on(
-      table.mcp_server_name,
-    ),
-    index("mcp_request_audit_logs_tool_name_idx").on(table.tool_name),
-    index("mcp_request_audit_logs_status_idx").on(table.status),
-    index("mcp_request_audit_logs_api_key_user_created_at_idx").on(
-      table.api_key_user_id,
-      table.created_at,
-    ),
-    index("mcp_request_audit_logs_oauth_user_created_at_idx").on(
-      table.oauth_user_id,
-      table.created_at,
-    ),
-    index("mcp_request_audit_logs_api_key_created_at_idx").on(
-      table.api_key_uuid,
-      table.created_at,
-    ),
-    index("mcp_request_audit_logs_namespace_created_at_idx").on(
-      table.namespace_uuid,
-      table.created_at,
-    ),
-    index("mcp_request_audit_logs_status_created_at_idx").on(
-      table.status,
-      table.created_at,
-    ),
-  ],
-);
-
 // Configuration table for app-wide settings
 export const configTable = pgTable("config", {
   id: text("id").primaryKey(),
@@ -532,51 +656,108 @@ export const configTable = pgTable("config", {
 });
 
 // OAuth Registered Clients table
-export const oauthClientsTable = pgTable("oauth_clients", {
-  client_id: text("client_id").primaryKey(),
-  client_secret: text("client_secret"),
-  client_name: text("client_name").notNull(),
-  redirect_uris: text("redirect_uris")
-    .array()
-    .notNull()
-    .default(sql`'{}'::text[]`),
-  grant_types: text("grant_types")
-    .array()
-    .notNull()
-    .default(sql`'{"authorization_code","refresh_token"}'::text[]`),
-  response_types: text("response_types")
-    .array()
-    .notNull()
-    .default(sql`'{"code"}'::text[]`),
-  token_endpoint_auth_method: text("token_endpoint_auth_method")
-    .notNull()
-    .default("none"),
-  scope: text("scope").default("admin"),
-  client_uri: text("client_uri"),
-  logo_uri: text("logo_uri"),
-  contacts: text("contacts").array(),
-  tos_uri: text("tos_uri"),
-  policy_uri: text("policy_uri"),
-  software_id: text("software_id"),
-  software_version: text("software_version"),
-  created_at: timestamp("created_at", { withTimezone: true })
-    .notNull()
-    .defaultNow(),
-  updated_at: timestamp("updated_at", { withTimezone: true })
-    .notNull()
-    .defaultNow(),
-});
+export const oauthClientsTable = pgTable(
+  "oauth_clients",
+  {
+    client_id: text("client_id").primaryKey(),
+    // At-rest form of the client secret (migration 0036). Because a client
+    // secret is a user-visible secret handed to a confidential client, it is
+    // SALTED (sha256 of secret||salt via hashClientSecret) rather than the
+    // unsalted digest the random tokens use; the token endpoint verifies with
+    // verifyClientSecret in constant time. NULL for a PKCE/public client
+    // ("none" auth method), which is issued no secret.
+    client_secret: text("client_secret"),
+    // The per-secret salt for client_secret above (migration 0036). NULL when
+    // client_secret is NULL. Not itself a secret, it exists only so the salted
+    // hash can be recomputed at verify time.
+    client_secret_salt: text("client_secret_salt"),
+    client_name: text("client_name").notNull(),
+    redirect_uris: text("redirect_uris")
+      .array()
+      .notNull()
+      .default(sql`'{}'::text[]`),
+    grant_types: text("grant_types")
+      .array()
+      .notNull()
+      .default(sql`'{"authorization_code","refresh_token"}'::text[]`),
+    response_types: text("response_types")
+      .array()
+      .notNull()
+      .default(sql`'{"code"}'::text[]`),
+    token_endpoint_auth_method: text("token_endpoint_auth_method")
+      .notNull()
+      .default("none"),
+    // Matches GRANTED_OAUTH_SCOPE ("mcp"), the one scope this server ever
+    // issues. The default used to be "admin", so a row written without an
+    // explicit scope — and every legacy row — recorded an administrative-
+    // sounding grant for a caller who was never an administrator. Scope carries
+    // no privilege here (checkOAuthAccess authorizes on user id + endpoint
+    // ownership and never reads it), so this is honest labelling rather than an
+    // access change — but handleRefreshTokenGrant copies the stored scope
+    // forward on every refresh, so a wrong default persists indefinitely.
+    // Migration 0026 flips the column default and rewrites the legacy rows.
+    // (Numbered 0026, not 0025: an earlier renumber left 0025 unused — the
+    // journal jumps idx 24 -> 26 — and this comment named the pre-renumber
+    // file until 2026-08-14.)
+    scope: text("scope").default("mcp"),
+    client_uri: text("client_uri"),
+    logo_uri: text("logo_uri"),
+    contacts: text("contacts").array(),
+    tos_uri: text("tos_uri"),
+    policy_uri: text("policy_uri"),
+    software_id: text("software_id"),
+    software_version: text("software_version"),
+    // Which mint path wrote this row. Read by exactly one query: the retention
+    // sweep in db/repositories/oauth.repo.ts, which deletes only 'dcr'.
+    //
+    // NULLABLE WITH NO DEFAULT, both on purpose. No default because a
+    // forgotten insert path must land as "unknown" (never swept) rather than
+    // inherit "dcr" (swept) — the column exists to protect rows, so its
+    // failure mode has to point at keeping them. Nullable because rows written
+    // before migration 0029 have a provenance nobody recorded, and inventing
+    // one for them would be the same guess the column was added to eliminate.
+    //
+    // `$type` narrows the TS type from `string`; the CHECK below is what makes
+    // that narrowing true of the DATA rather than just of the code, since psql
+    // is a routine ops path here and could otherwise write a third value the
+    // sweep would silently never match.
+    registration_source: text(
+      "registration_source",
+    ).$type<OAuthClientRegistrationSource>(),
+    created_at: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updated_at: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    // Migration 0029. NULL stays legal — it is the honest value for every row
+    // that predates the column.
+    check(
+      "oauth_clients_registration_source_valid",
+      sql`${table.registration_source} IS NULL OR ${table.registration_source} IN ('dcr', 'admin')`,
+    ),
+  ],
+);
 
 // OAuth Authorization Codes table
 export const oauthAuthorizationCodesTable = pgTable(
   "oauth_authorization_codes",
   {
+    // At-rest form of the authorization code (migration 0036): the unsalted
+    // lowercase-hex sha256, not the code, hashed through hashApiKey(). It stays
+    // the primary key (single-use consumption is a DELETE by this key) and is
+    // looked up by hashing the presented code. Codes are 256-bit random and
+    // expire in ten minutes, so an unsalted digest is correct and no last4 is
+    // kept, a code is never displayed.
     code: text("code").primaryKey(),
     client_id: text("client_id")
       .notNull()
       .references(() => oauthClientsTable.client_id, { onDelete: "cascade" }),
     redirect_uri: text("redirect_uri").notNull(),
-    scope: text("scope").notNull().default("admin"),
+    // "mcp", not "admin" — see oauthClientsTable.scope above.
+    scope: text("scope").notNull().default("mcp"),
     user_id: text("user_id")
       .notNull()
       .references(() => usersTable.id, { onDelete: "cascade" }),
@@ -598,19 +779,47 @@ export const oauthAuthorizationCodesTable = pgTable(
 export const oauthAccessTokensTable = pgTable(
   "oauth_access_tokens",
   {
+    // At-rest form of the access token (migration 0036). The token itself is
+    // NOT stored: this column holds the unsalted lowercase-hex sha256 of it,
+    // written and looked up only through lib/api-key-hash.ts's hashApiKey() so
+    // the mint path and the authentication lookup can never disagree about the
+    // encoding. It stays the primary key, distinct 256-bit tokens have
+    // distinct digests, and nothing references it by foreign key, so the
+    // 0036 backfill could rewrite it in place. Equal to the audit log's
+    // credentialFingerprint of the same token, which is what lets a denied
+    // request join back to the row that issued it.
     access_token: text("access_token").primaryKey(),
+    // The token's last 4 characters, the only part kept in readable form
+    // (migration 0036), the same tail the audit log records. Enough for the
+    // Access dashboard to show a token's tail and for an operator to correlate
+    // a listed token with an audit row; useless as a credential.
+    access_token_last4: text("access_token_last4").notNull(),
     client_id: text("client_id")
       .notNull()
       .references(() => oauthClientsTable.client_id, { onDelete: "cascade" }),
     user_id: text("user_id")
       .notNull()
       .references(() => usersTable.id, { onDelete: "cascade" }),
-    scope: text("scope").notNull().default("admin"),
+    // "mcp", not "admin" — see oauthClientsTable.scope above.
+    scope: text("scope").notNull().default("mcp"),
     expires_at: timestamp("expires_at", { withTimezone: true }).notNull(),
+    // At-rest form of the refresh token (migration 0036): the unsalted
+    // lowercase-hex sha256, not the token, hashed through the same hashApiKey()
+    // as access_token. NULL when the grant issued no refresh token. Looked up
+    // by hashing the presented refresh token and matching digests.
     refresh_token: text("refresh_token"),
     refresh_token_expires_at: timestamp("refresh_token_expires_at", {
       withTimezone: true,
     }),
+    // Refresh-token family (migration 0037). Every token pair in one refresh
+    // chain shares this id: the authorization_code grant starts a new family,
+    // each refresh rotation inherits it. Reuse of a rotated-out refresh token
+    // is detected via oauthRotatedRefreshTokensTable and revokes the whole
+    // family with a single delete keyed on this column. A random uuid, so it is
+    // never a value a caller can present or predict. The DB default exists
+    // only so an image predating 0037 (which inserts without this column)
+    // keeps working if rolled back; the app always supplies the value.
+    family_id: uuid("family_id").notNull().defaultRandom(),
     created_at: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -620,5 +829,433 @@ export const oauthAccessTokensTable = pgTable(
     index("oauth_access_tokens_user_id_idx").on(table.user_id),
     index("oauth_access_tokens_expires_at_idx").on(table.expires_at),
     index("oauth_access_tokens_refresh_token_idx").on(table.refresh_token),
+    // Revocation on reuse is a DELETE keyed on family_id (migration 0037).
+    index("oauth_access_tokens_family_id_idx").on(table.family_id),
+    // Migration 0035. A refresh token and its expiry must be present together:
+    // a row with a refresh token but a NULL expiry is never-expiring and
+    // never-reaped (cleanupExpired misses it, the refresh grant treats a NULL
+    // expiry as valid), so the both-or-neither shape is enforced at the column
+    // level and not only in the app write path.
+    check(
+      "oauth_access_tokens_refresh_pairing",
+      sql`(${table.refresh_token} IS NULL) = (${table.refresh_token_expires_at} IS NULL)`,
+    ),
+  ],
+);
+
+// Rotated-out refresh tokens (migration 0037): the reuse-detection surface for
+// OAuth refresh-token families.
+//
+// The refresh grant rotates on every use — it issues a new pair and DELETES the
+// old row — so a presented refresh token that is not a live token normally just
+// gets invalid_grant, which hides the case that matters: an attacker who stole a
+// refresh token, rotated it, and left the legitimate client holding a copy that
+// no longer resolves. Recording every rotated-out token here turns that silent
+// miss into a detected reuse: a presented token found in this table (and not in
+// the live table) revokes the whole `family_id` and returns invalid_grant.
+//
+// refresh_token_hash is the SAME sha256 the live table stores (migration 0036),
+// so detection hashes the presented token and matches the digest, never the
+// plaintext. client_id / user_id are carried so the reuse audit event can name
+// the compromised client and user even after the family's live rows are gone,
+// and both cascade with their parent — the same posture oauth_access_tokens
+// takes — so deleting a client or user leaves no orphan markers. expires_at is
+// the rotated token's own expiry, so `cleanupExpired` reaps a marker with the
+// family; a family that is reused is collapsed at detection time instead.
+export const oauthRotatedRefreshTokensTable = pgTable(
+  "oauth_rotated_refresh_tokens",
+  {
+    refresh_token_hash: text("refresh_token_hash").primaryKey(),
+    family_id: uuid("family_id").notNull(),
+    client_id: text("client_id")
+      .notNull()
+      .references(() => oauthClientsTable.client_id, { onDelete: "cascade" }),
+    user_id: text("user_id")
+      .notNull()
+      .references(() => usersTable.id, { onDelete: "cascade" }),
+    expires_at: timestamp("expires_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    // Revocation deletes every marker for a family; the reaper sweeps on expiry.
+    index("oauth_rotated_refresh_tokens_family_id_idx").on(table.family_id),
+    index("oauth_rotated_refresh_tokens_expires_at_idx").on(table.expires_at),
+  ],
+);
+
+// MCP Sessions table — persists Streamable HTTP session metadata so that
+// metamcp restarts don't force every consumer to re-initialize. When a
+// request arrives with an unknown `Mcp-Session-Id` (in-memory transport
+// map empty after restart), the router queries this table and lazily
+// recreates the transport from the stored namespace + auth principal +
+// init params. See `apps/backend/src/routers/public-metamcp/streamable-http.ts`
+// for the recovery path and `mcp-sessions.repo.ts` for the access layer.
+//
+// auth_principal is a constant-time-compared SHA-256 of the original
+// bearer token (or API key). Raw tokens are never stored. If the client
+// rotates / revokes its token, the lazy-recovery path refuses and the
+// client must initialize a fresh session.
+export const mcpSessionsTable = pgTable(
+  "mcp_sessions",
+  {
+    session_id: text("session_id").primaryKey(),
+    namespace_uuid: uuid("namespace_uuid").notNull(),
+    endpoint_name: text("endpoint_name").notNull(),
+    auth_principal: text("auth_principal").notNull(),
+    auth_method: text("auth_method").notNull(),
+    init_params: jsonb("init_params")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    created_at: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    last_seen_at: timestamp("last_seen_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    // PR #22: gateway process UUID stamped at session init. Nullable
+    // for backwards-compat with rows persisted before this column
+    // existed; the lazy-recovery path treats null as "allow" (pre-PR
+    // row, no metadata to compare) and treats mismatch as "refuse"
+    // (cross-restart row whose negotiated capability set may now be
+    // stale). See `lib/metamcp/gateway-boot-id.ts`.
+    gateway_boot_id: uuid("gateway_boot_id"),
+    // PR #23: SHA-256 of the upstream-advertised capability set at
+    // session init. Used alongside `gateway_boot_id` so lazy-recovery
+    // refuses only when capabilities actually changed across a
+    // restart (different boot_id AND different hash), not on every
+    // capability-neutral restart (different boot_id, same hash —
+    // safe to recover). Nullable for backwards-compat with rows
+    // persisted before this column existed. See
+    // `lib/metamcp/gateway-boot-id.ts#shouldRefuseRecovery`.
+    capability_hash: text("capability_hash"),
+  },
+  (table) => [
+    index("mcp_sessions_last_seen_at_idx").on(table.last_seen_at),
+    index("mcp_sessions_namespace_uuid_idx").on(table.namespace_uuid),
+  ],
+);
+
+// M365 delegated-token broker: per-user Entra refresh-token custody.
+//
+// One row per enrolled gateway user. `rt_ciphertext` is an
+// AES-256-GCM envelope (`lib/m365/crypto.ts`) — plaintext refresh
+// tokens are NEVER stored (deliberately separate from better-auth's
+// `accounts` table, which persists provider tokens unencrypted).
+// `kek_id` mirrors the envelope header for SQL-side visibility during
+// KEK rotation. Row deletion cascades with the user (FK) and is the
+// primary revocation surface (`/m365/disconnect`); Entra-side disable /
+// revokeSignInSessions is the org kill switch. `status` values:
+// `active`, `reauth_required` (refresh grant rejected — row kept for
+// audit, mint path treats it as missing).
+export const m365UserTokensTable = pgTable(
+  "m365_user_tokens",
+  {
+    uuid: uuid("uuid")
+      .primaryKey()
+      .default(sql`gen_random_uuid()`),
+    user_id: text("user_id")
+      .notNull()
+      .unique()
+      .references(() => usersTable.id, { onDelete: "cascade" }),
+    // Entra object id + tenant of the enrolled account — audit surface
+    // only (not enforced): a re-enrollment overwrites them, and the
+    // callback route logs an m365_enroll_account_switch event when the
+    // oid changes rather than blocking the legitimate account switch.
+    entra_oid: text("entra_oid").notNull(),
+    tenant_id: text("tenant_id").notNull(),
+    entra_upn: text("entra_upn"),
+    rt_ciphertext: text("rt_ciphertext").notNull(),
+    kek_id: text("kek_id").notNull(),
+    scopes_granted: text("scopes_granted").notNull(),
+    status: text("status").notNull().default("active"),
+    created_at: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    rotated_at: timestamp("rotated_at", { withTimezone: true }),
+    last_used_at: timestamp("last_used_at", { withTimezone: true }),
+  },
+  (table) => [index("m365_user_tokens_status_idx").on(table.status)],
+);
+
+// Tool-call audit log (fork feature — Umbrella TASKLIST "Tool-call audit
+// logging" SPEC): one row per proxied tools/call so "who called what when"
+// is SQL-queryable instead of a Loki grep. Raw params are NEVER stored —
+// `params_hash` is a sha256 of the JSON-serialized arguments. Written
+// fire-and-forget by the auditing middleware (an audit-write failure must
+// never fail the tool call); pruned after TOOL_AUDIT_RETENTION_DAYS
+// (default 90) by the oauth cleanup interval. `client_name` is the resolved
+// consumer identity (api-key name / OAuth user email) rather than the
+// SPEC's raw user_id — api-key consumers have no user row.
+export const toolCallAuditTable = pgTable(
+  "tool_call_audit",
+  {
+    uuid: uuid("uuid")
+      .primaryKey()
+      .default(sql`gen_random_uuid()`),
+    called_at: timestamp("called_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    client_name: text("client_name"),
+    namespace_uuid: text("namespace_uuid"),
+    session_id: text("session_id"),
+    server_name: text("server_name").notNull(),
+    tool_name: text("tool_name").notNull(),
+    params_hash: text("params_hash"),
+    success: boolean("success").notNull(),
+    error_code: text("error_code"),
+    latency_ms: integer("latency_ms"),
+    // Caller binding (migration 0030). `client_name` above is a DISPLAY
+    // LABEL — composed from a mutable email, empty wherever no identity was
+    // resolved — so it describes a call without attributing it. These five
+    // columns are the attribution: which credential, which auth method, which
+    // account, from which address, as part of which request.
+    //
+    // NO FOREIGN KEY on api_key_uuid, deliberately. `api_keys.user_id`
+    // cascades on user delete and keys are revoked routinely; an FK here
+    // would either delete the audit rows with the key or block the deletion.
+    // The audit trail has to outlive the credential it names — an attributed
+    // call whose key was revoked afterwards is precisely the row an
+    // investigation wants.
+    //
+    // `user_id` is the CREDENTIAL OWNER (api-key owner or OAuth subject);
+    // `acts_as_user_id` is the delegated identity an admin key exercised
+    // (`api_keys.acts_as_user_id`, migration 0024). Two columns, not one: one
+    // answers "whose credential", the other "whose identity was exercised",
+    // and collapsing them makes a delegated call indistinguishable from a
+    // direct one. The pair also appears inside `client_name` as
+    // `key (as email)`, but that string is composed from a mutable email
+    // through a cache that degrades to a short id on a read failure — a label,
+    // not something to query on.
+    //
+    // `caller_ip` is CF-Connecting-IP, bounded at AUDIT_IP_MAX where it is
+    // read; `request_id` is the audit-context middleware's per-request id,
+    // shared with `audit_log.request_id` so one request's control-plane and
+    // tool-plane records join.
+    api_key_uuid: uuid("api_key_uuid"),
+    auth_method: text("auth_method"),
+    user_id: text("user_id"),
+    acts_as_user_id: text("acts_as_user_id"),
+    caller_ip: text("caller_ip"),
+    request_id: text("request_id"),
+    // Migration 0039. Both NULLABLE, unconstrained and unindexed, for the same
+    // reason as the 0030 columns above: the write is fire-and-forget and a
+    // violation would be a swallowed INSERT failure, i.e. a silently missing
+    // audit row. NULL means "not recorded" (every row before the migration,
+    // or the kill switch was off); the table is write-once (0032), so it cannot
+    // be backfilled.
+    //
+    // `args_shape` is the SHAPE of the call: top-level key names plus the value
+    // of six allowlisted selector keys, never any other argument value (see
+    // lib/metamcp/metamcp-middleware/audit-args-shape).
+    // `error_detail` is the tool's own failure code token beside the
+    // `error_code` class (see audit-classify). Type-only import: this module
+    // must stay free of any runtime dependency on lib/.
+    args_shape: jsonb("args_shape").$type<ArgsShape>(),
+    error_detail: text("error_detail"),
+  },
+  (table) => [
+    index("tool_call_audit_called_at_idx").on(table.called_at),
+    index("tool_call_audit_tool_name_idx").on(table.tool_name),
+    index("tool_call_audit_client_name_idx").on(table.client_name),
+    // Only api_key_uuid gets an index of the five. "What did this credential
+    // do" is the question a key compromise forces and it scans the whole
+    // table without one; the other four are read after a row is already in
+    // hand (request_id joins a handful of rows, caller_ip / user_id /
+    // auth_method are filters on an already-bounded time window). Every index
+    // is a cost on the insert path of a table written once per tool call.
+    index("tool_call_audit_api_key_uuid_idx").on(table.api_key_uuid),
+  ],
+);
+
+// Control-plane security audit log (migration 0028). Companion to
+// `tool_call_audit` above, deliberately a SECOND table rather than more
+// columns on that one: different write rate, different query shape, and
+// `tool_call_audit` already has consumers whose indexes should not churn.
+//
+// The two differ in one more way that matters: `tool_call_audit` is pruned
+// (`pruneOlderThan`, hard DELETE, 90d). This table has NO prune, NO update
+// and NO delete anywhere in the application — the repository exposes
+// `record()` and nothing else, and migration 0028 adds BEFORE
+// UPDATE/DELETE/TRUNCATE triggers that RAISE. That asymmetry is the point:
+// an audit archive an admin can empty is not an audit archive.
+//
+// Raw secrets are NEVER written. `detail` carries a sha256 + last-4
+// fingerprint of a presented credential, never the credential.
+export const auditLogTable = pgTable(
+  "audit_log",
+  {
+    uuid: uuid("uuid")
+      .primaryKey()
+      .default(sql`gen_random_uuid()`),
+    occurred_at: timestamp("occurred_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    // user | api_key | oauth_client | anonymous | system. Kept as text
+    // rather than a pgEnum: a new actor class must never be able to make an
+    // audit INSERT fail, and a failed audit INSERT is a silently missing
+    // security record.
+    actor_type: text("actor_type").notNull(),
+    actor_id: text("actor_id"),
+    actor_label: text("actor_label"),
+    // Resolved from CF-Connecting-IP by the audit-context middleware, not
+    // from req.ip (which is container-local for every caller — see
+    // middleware/audit-context.middleware.ts).
+    actor_ip: text("actor_ip"),
+    actor_user_agent: text("actor_user_agent"),
+    action: text("action").notNull(),
+    target_type: text("target_type"),
+    target_id: text("target_id"),
+    // success | failure | denied — same reasoning as actor_type for staying
+    // text.
+    outcome: text("outcome").notNull(),
+    request_id: text("request_id"),
+    http_status: integer("http_status"),
+    detail: jsonb("detail")
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+  },
+  (table) => [
+    index("audit_log_occurred_at_idx").on(table.occurred_at),
+    index("audit_log_action_idx").on(table.action),
+    index("audit_log_actor_id_idx").on(table.actor_id),
+    index("audit_log_outcome_idx").on(table.outcome),
+  ],
+);
+
+// Gateway activity history (migration 0031). The durable half of the Live
+// Logs page: the in-memory ring buffer in `lib/metamcp/log-store.ts` keeps the
+// last 2000 entries for the live tail, and every one of them that is not a
+// tool call is also written here so the history survives a restart.
+//
+// `tool_call` is deliberately NOT one of the categories. Those rows already
+// exist in `tool_call_audit` above, with more detail (params hash, latency,
+// namespace) than this envelope carries — writing them twice would double the
+// busiest write path in the gateway to store a poorer copy. The writer in
+// `lib/gateway-events/sink.ts` filters the category out.
+//
+// Retention differs from BOTH neighbours, which is the reason it is a third
+// table. `tool_call_audit` is prunable at any age; `audit_log` is never
+// prunable at all. This one is immutable for 30 days and prunable after —
+// migration 0031 installs an age-gated DELETE trigger plus unconditional
+// UPDATE/TRUNCATE blocks, and `lib/gateway-events/retention.ts` floor-clamps
+// the retention env to the same 30 days so the sweeper can never ask for a
+// deletion the database refuses.
+export const gatewayEventsTable = pgTable(
+  "gateway_events",
+  {
+    uuid: uuid("uuid")
+      .primaryKey()
+      .default(sql`gen_random_uuid()`),
+    // Millisecond precision, matching migration 0031. The keyset cursor is a
+    // JavaScript Date, which cannot carry microseconds, so a finer column would
+    // hand back a cursor slightly earlier than the row it came from and skip
+    // every row sharing that millisecond.
+    occurred_at: timestamp("occurred_at", { withTimezone: true, precision: 3 })
+      .notNull()
+      .defaultNow(),
+    // connection | client | server | system. Text rather than a pgEnum for the
+    // same reason `audit_log.actor_type` is text: a new event class must never
+    // be able to make this INSERT fail.
+    category: text("category").notNull(),
+    // info | warn | error. Nullable because the column describes severity, and
+    // an event that arrives without one is still worth keeping.
+    level: text("level"),
+    server_uuid: uuid("server_uuid"),
+    server_name: text("server_name"),
+    client_name: text("client_name"),
+    session_id: text("session_id"),
+    message: text("message").notNull(),
+    // Small, clamped extras (tool name, duration, normalized error text).
+    // Nullable rather than defaulting to `{}` so "nothing to add" and "an empty
+    // object was supplied" stay distinguishable.
+    metadata: jsonb("metadata"),
+  },
+  (table) => [
+    // Mirrors the DESC indexes migration 0031 creates — the history view reads
+    // newest-first and pages with a keyset on (occurred_at, uuid).
+    index("gateway_events_occurred_at_idx").on(table.occurred_at.desc()),
+    index("gateway_events_category_occurred_at_idx").on(
+      table.category,
+      table.occurred_at.desc(),
+    ),
+  ],
+);
+
+// Named access groups (migration 0033): which OAuth users may reach which
+// endpoints.
+//
+// Deliberately shaped like namespaces — a named, reusable set that users join
+// and endpoints are mapped to — rather than as a per-user allow-list on the
+// endpoint row. A deployment generally has more endpoints than it has distinct
+// audiences, so the set is the thing worth naming: adding a person to
+// "helpdesk" is one row, while an allow-list per endpoint would be one row per
+// endpoint per person and would drift the moment an endpoint is added.
+//
+// Enforcement lives in `lib/endpoint-access-control` and is applied on the
+// OAuth branches of `middleware/api-key-oauth.middleware`.
+export const accessGroupsTable = pgTable("access_groups", {
+  uuid: uuid("uuid").primaryKey().defaultRandom(),
+  // Globally unique: the name is how an operator refers to a group in the UI
+  // and in an audit row's `detail`, so two groups sharing one makes both the
+  // screen and the record ambiguous. No user scoping, unlike namespaces —
+  // groups are gateway-level authorization configuration, administered only by
+  // administrators, so there is no per-owner space for names to live in.
+  name: text("name").notNull().unique(),
+  description: text("description"),
+  created_at: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+export const accessGroupMembersTable = pgTable(
+  "access_group_members",
+  {
+    group_uuid: uuid("group_uuid")
+      .notNull()
+      .references(() => accessGroupsTable.uuid, { onDelete: "cascade" }),
+    // `users.id` is text (better-auth owns the id format), not uuid.
+    user_id: text("user_id")
+      .notNull()
+      .references(() => usersTable.id, { onDelete: "cascade" }),
+    created_at: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    // The pair IS the row's identity — there is nothing else to record about a
+    // membership — so the composite PK is both the key and the uniqueness
+    // guarantee, and a repeated add conflicts instead of granting twice.
+    primaryKey({
+      name: "access_group_members_pkey",
+      columns: [table.group_uuid, table.user_id],
+    }),
+    // The PK covers group-first scans (the admin UI listing one group's
+    // members). The authorization path starts from the USER, whose leading
+    // column the PK cannot serve.
+    index("access_group_members_user_id_idx").on(table.user_id),
+  ],
+);
+
+export const accessGroupEndpointsTable = pgTable(
+  "access_group_endpoints",
+  {
+    group_uuid: uuid("group_uuid")
+      .notNull()
+      .references(() => accessGroupsTable.uuid, { onDelete: "cascade" }),
+    endpoint_uuid: uuid("endpoint_uuid")
+      .notNull()
+      .references(() => endpointsTable.uuid, { onDelete: "cascade" }),
+    created_at: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    primaryKey({
+      name: "access_group_endpoints_pkey",
+      columns: [table.group_uuid, table.endpoint_uuid],
+    }),
+    // Same reasoning as the members index: the authorization path filters on
+    // endpoint_uuid, which is the PK's trailing column.
+    index("access_group_endpoints_endpoint_uuid_idx").on(table.endpoint_uuid),
   ],
 );

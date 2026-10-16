@@ -111,7 +111,12 @@
     "updateSuccess": "Endpoint Actualizado",
     "updateSuccessDescription": "El endpoint ha sido actualizado exitosamente",
     "updateFailed": "Error en la Actualización",
-    "updateFailedDescription": "Error al actualizar endpoint"
+    "updateFailedDescription": "Error al actualizar endpoint",
+    "adminToolsSection": "MetaMCP Admin Tools",
+    "enableMetamcpAdminToolsLabel": "Expose MetaMCP admin tools",
+    "enableMetamcpAdminToolsDescription": "Add MetaMCP configuration tools (servers, namespaces, endpoints, API keys, settings) to this MCP endpoint. Requires API key or OAuth authentication.",
+    "requireScopedApiKeyLabel": "Require Endpoint-Scoped API Keys",
+    "requireScopedApiKeyDescription": "Only accept API keys scoped to this endpoint; reject gateway-wide (unscoped) keys. Applies to API-key auth only — OAuth access is unaffected."
   },
   "list": {
     "title": "Endpoints",
@@ -146,6 +151,14 @@
     "shttpUrlWithApiKeyCopied": "URL SHTTP con parámetro de API key copiada al portapapeles",
     "openApiUrlWithApiKeyCopied": "URL OpenAPI con parámetro de API key copiada al portapapeles",
     "openApiSchemaUrlWithApiKeyCopied": "URL del Schema OpenAPI con parámetro de API key copiada al portapapeles",
-    "noResults": "Sin resultados."
-  }
+    "noResults": "Sin resultados.",
+    "deleteConfirmScopedKeyWarning": "Any API keys scoped to this endpoint will also be permanently deleted."
+  },
+  "adminToolsSection": "MetaMCP Admin Tools",
+  "enableMetamcpAdminTools": "Expose MetaMCP admin tools",
+  "enableMetamcpAdminToolsDescription": "Add MetaMCP configuration tools (servers, namespaces, endpoints, API keys, settings) to this MCP endpoint. Requires API key or OAuth authentication.",
+  "requireScopedApiKey": "Require Endpoint-Scoped API Keys",
+  "requireScopedApiKeyDescription": "Only accept API keys scoped to this endpoint; reject gateway-wide (unscoped) keys. Applies to API-key auth only — OAuth access is unaffected.",
+  "restrictedLabel": "Restrict to access groups",
+  "restrictedDescription": "When on, only administrators and members of a mapped access group reach this endpoint over OAuth. Turning it on also requires endpoint-scoped API keys, so unscoped gateway-wide keys are rejected too."
 }

@@ -1,7 +1,8 @@
 import crypto from "node:crypto";
 
 import { ConfigKeyEnum } from "@repo/zod-types";
-import { and, eq, isNull, notInArray } from "drizzle-orm";
+import { and, eq, isNull, notInArray, or } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 
 import { auth } from "../auth";
 import { db } from "../db";
@@ -13,11 +14,189 @@ import {
   namespacesTable,
   usersTable,
 } from "../db/schema";
+import { apiKeyLast4, hashApiKey } from "./api-key-hash";
+import { emitAdminEvent } from "./audit/admin-event";
+import { setBootstrapSignupAllowed } from "./bootstrap-signup-override";
+import {
+  MIN_BOOTSTRAP_PASSWORD_LENGTH,
+  SHIPPED_PLACEHOLDER_AUTH_SECRET,
+  SHIPPED_PLACEHOLDER_PASSWORDS,
+  shouldRefuseBootstrapPasswordInProduction,
+} from "./shipped-placeholders";
 
 /**
  * Environment-based bootstrap for MetaMCP.
  * Supports arrays of Users, API Keys, Namespaces, and Endpoints via JSON environment variables.
  */
+
+/**
+ * Columns preserved when `BOOTSTRAP_RECREATE_USER=true` +
+ * `preserveApiKeysOnRecreate` deletes and re-creates the bootstrap user.
+ * `endpoint_uuid` marks the key as scoped (migration 0023) — without it a
+ * scoped key silently comes back as a NULL / gateway-wide key on the next
+ * container recreate, a silent privilege escalation on a supported ops path.
+ * `endpoint_name` is equally load-bearing: deleting the user CASCADES away
+ * every USER-OWNED endpoint (`endpoints_user_id_users_id_fk` is
+ * `ON DELETE cascade`), and `bootstrapEndpoints` later recreates them with
+ * FRESH uuids — so the preserved uuid is stale by restore time and the
+ * NAME is the only stable handle to re-resolve the scope against. The
+ * preserve projection is typed to this shape, so dropping either field
+ * from the select is a compile error, not a silent regression.
+ *
+ * `acts_as_user_id` + `acts_as_email` (migration 0024) are the identity
+ * binding's pair of handles, with EXACTLY the endpoint pair's split of
+ * roles: the recreate deletes the user row and better-auth sign-up mints a
+ * brand-new id, so the preserved user id is stale by restore time and the
+ * EMAIL is the only stable handle to re-resolve the binding against.
+ * Restoring a bound key WITHOUT its binding would be silent degradation
+ * (the key authenticates, m365 injection fail-closes, the log says
+ * restored) — a bound key whose identity cannot be re-resolved is SKIPPED
+ * loudly instead.
+ */
+export interface PreservedApiKey {
+  name: string;
+  /**
+   * The key's AT-REST pair (migration 0034), carried together and never
+   * separated. The gateway no longer stores the credential, so preservation
+   * copies the stored hash and display tail verbatim — which is exactly what
+   * makes a preserved key keep authenticating after the recreate: the same
+   * digest goes back in, so the same secret still matches it. Dropping either
+   * half here would leave a row that cannot authenticate (missing hash) or
+   * cannot be identified in the UI (missing tail).
+   */
+  key_hash: string;
+  last4: string;
+  is_active: boolean;
+  endpoint_uuid: string | null;
+  endpoint_name: string | null;
+  acts_as_user_id: string | null;
+  acts_as_email: string | null;
+  // Plane flag (migration 0038). Preserved verbatim so a control-plane (CI) key
+  // keeps its plane across a recreate, without it a recreate would silently
+  // DEMOTE the key to a data-plane key that then fails on /trpc. It carries no
+  // scope or acts-as to re-resolve (the CHECK constraints forbid both on an
+  // admin-plane row), so unlike endpoint_uuid/acts_as it restores as-is.
+  admin_plane: boolean;
+}
+
+/** One key restore that could not be performed, with why — surfaced loudly. */
+export interface SkippedApiKeyRestore {
+  keyName: string;
+  reason: "endpoint_missing" | "acts_as_unresolvable";
+  endpointName: string | null;
+  endpointUuid: string | null;
+  actsAsEmail: string | null;
+}
+
+/**
+ * Decide, for a batch of preserved keys, which can be restored onto the
+ * recreated user and which must be SKIPPED. Pure so the invariants can be
+ * unit-tested without a live DB (`bootstrap.preserve.test.ts`).
+ *
+ * Rules:
+ * - An unscoped key (`endpoint_uuid` NULL) restores as-is: NULL scope is
+ *   the deliberately-grandfathered gateway-wide class, not a promotion.
+ * - A scoped key restores ONLY by re-resolving its endpoint NAME to the
+ *   endpoint's CURRENT uuid (`endpointUuidByName` — the post-
+ *   `bootstrapEndpoints` state). The preserved uuid is never inserted:
+ *   for user-owned endpoints it dangles (FK violation) after the recreate
+ *   cascade.
+ * - A scoped key whose endpoint no longer exists (or whose name could not
+ *   be captured at preserve time) is SKIPPED — NEVER restored with a NULL
+ *   scope, which would silently widen it to gateway-wide.
+ * - An identity-bound key (`acts_as_user_id` non-NULL, migration 0024)
+ *   restores ONLY by re-resolving its acted-as EMAIL to the user's CURRENT
+ *   id (`userIdByEmail` — the post-`bootstrapUsers` state; the recreate
+ *   mints a fresh user id, so the preserved id is stale). If the email is
+ *   missing or resolves to no current user, the key is SKIPPED — NEVER
+ *   restored unbound (silent degradation: the key would authenticate while
+ *   m365 injection fail-closes) and never bound to a guessed identity.
+ */
+export function planPreservedApiKeyRestores(
+  keys: PreservedApiKey[],
+  userId: string,
+  endpointUuidByName: ReadonlyMap<string, string>,
+  userIdByEmail: ReadonlyMap<string, string>,
+): {
+  restores: {
+    name: string;
+    key_hash: string;
+    last4: string;
+    user_id: string;
+    is_active: boolean;
+    endpoint_uuid: string | null;
+    acts_as_user_id: string | null;
+    admin_plane: boolean;
+  }[];
+  skipped: SkippedApiKeyRestore[];
+} {
+  const restores: {
+    name: string;
+    key_hash: string;
+    last4: string;
+    user_id: string;
+    is_active: boolean;
+    endpoint_uuid: string | null;
+    acts_as_user_id: string | null;
+    admin_plane: boolean;
+  }[] = [];
+  const skipped: SkippedApiKeyRestore[] = [];
+
+  for (const k of keys) {
+    let resolvedEndpointUuid: string | null = null;
+    if (k.endpoint_uuid !== null) {
+      const currentUuid =
+        k.endpoint_name !== null
+          ? endpointUuidByName.get(k.endpoint_name)
+          : undefined;
+      if (currentUuid === undefined) {
+        skipped.push({
+          keyName: k.name,
+          reason: "endpoint_missing",
+          endpointName: k.endpoint_name,
+          endpointUuid: k.endpoint_uuid,
+          actsAsEmail: k.acts_as_email,
+        });
+        continue;
+      }
+      resolvedEndpointUuid = currentUuid;
+    }
+
+    let resolvedActsAsUserId: string | null = null;
+    if (k.acts_as_user_id !== null) {
+      const currentId =
+        k.acts_as_email !== null
+          ? userIdByEmail.get(k.acts_as_email)
+          : undefined;
+      if (currentId === undefined) {
+        skipped.push({
+          keyName: k.name,
+          reason: "acts_as_unresolvable",
+          endpointName: k.endpoint_name,
+          endpointUuid: k.endpoint_uuid,
+          actsAsEmail: k.acts_as_email,
+        });
+        continue;
+      }
+      resolvedActsAsUserId = currentId;
+    }
+
+    restores.push({
+      name: k.name,
+      key_hash: k.key_hash,
+      last4: k.last4,
+      user_id: userId,
+      is_active: k.is_active,
+      endpoint_uuid: resolvedEndpointUuid,
+      acts_as_user_id: resolvedActsAsUserId,
+      // Preserved verbatim (migration 0038): an admin-plane key carries no
+      // scope or identity to re-resolve, so its plane restores as-is.
+      admin_plane: k.admin_plane,
+    });
+  }
+
+  return { restores, skipped };
+}
 
 type UserConfig = {
   email: string;
@@ -30,6 +209,16 @@ type ApiKeyConfig = {
   is_public?: boolean;
   user_email?: string; // Email of user who owns this key (for private keys)
   owner?: string; // Alias for user_email
+  /**
+   * The key's VALUE, supplied by the operator. Required to create a key
+   * (see `bootstrapApiKeys`): since migration 0034 only a hash is stored, so
+   * a bootstrap-minted random value could never be read back by any surface
+   * and there is no rotate endpoint to recover from that. The operator holds
+   * this value already — it goes into whatever client config consumes the
+   * gateway — so provisioning it here keeps the credential out of the boot
+   * log entirely and makes repeated boots deterministic.
+   */
+  key?: string;
 };
 
 type NamespaceConfig = {
@@ -99,8 +288,54 @@ function nonEmpty(value: string | undefined): string | undefined {
   return v ? v : undefined;
 }
 
-function generateApiKey(): string {
-  return `sk_mt_${crypto.randomBytes(32).toString("hex")}`; // 64 hex chars
+/**
+ * Shortest operator-supplied `BOOTSTRAP_API_KEYS[].key` this will accept.
+ *
+ * The at-rest encoding is an UNSALTED sha256 (lib/api-key-hash.ts), which is
+ * safe only because the input is a high-entropy token rather than a
+ * human-chosen secret: with no salt, a short or guessable key is a rainbow
+ * table lookup away from recovery by anyone who reads `api_keys.key_hash` —
+ * the exact read access migration 0034 exists to render useless. 32
+ * characters is well under what the repository mint emits (`sk_mt_` + 64 hex
+ * = 70) and well over anything a person types by hand, so it rejects
+ * passphrases without rejecting real tokens.
+ */
+const MIN_CONFIGURED_API_KEY_LENGTH = 32;
+
+/**
+ * Validate an operator-supplied key value from `BOOTSTRAP_API_KEYS`.
+ *
+ * Returns the value when usable, or a human-readable reason when not. Every
+ * rejection is a SKIP rather than a fallback to a generated value: falling
+ * back would create a row holding a credential the operator neither chose
+ * nor can read, which is the failure this field exists to prevent.
+ *
+ * Surrounding whitespace is refused rather than trimmed. `hashApiKey` hashes
+ * its input exactly as given and the API-key middleware passes the presented
+ * header raw, so silently trimming here would store a digest for a value the
+ * operator did not write, and their padded copy would 401 with nothing in
+ * any log explaining why.
+ */
+function validateConfiguredApiKey(
+  value: string,
+): { ok: true; key: string } | { ok: false; reason: string } {
+  if (value.trim() !== value) {
+    return {
+      ok: false,
+      reason:
+        'its "key" has leading or trailing whitespace (the value is hashed exactly as written, so the padding would have to be presented too)',
+    };
+  }
+  if (!value) {
+    return { ok: false, reason: 'its "key" is empty' };
+  }
+  if (value.length < MIN_CONFIGURED_API_KEY_LENGTH) {
+    return {
+      ok: false,
+      reason: `its "key" is shorter than ${MIN_CONFIGURED_API_KEY_LENGTH} characters (the at-rest hash is unsalted, so a low-entropy key is recoverable from the database)`,
+    };
+  }
+  return { ok: true, key: value };
 }
 
 function maskKey(key: string): string {
@@ -192,14 +427,38 @@ function parseEnvConfig(): EnvConfig {
       false,
     ),
 
-    // Registration controls
+    // Registration controls. Upstream defaults BOTH of these OPEN, so an
+    // unset variable on a template-derived deploy silently re-opens
+    // self-registration, an unauthenticated account-creation exposure on a
+    // gateway whose whole access model assumes accounts are provisioned.
+    // Absence is therefore read as DISABLED here, and `parseBool` returns the
+    // default for an unparseable value as well as an undefined one, so a typo
+    // (`BOOTSTRAP_DISABLE_REGISTRATION_UI=flase`) also fails closed rather
+    // than opening the door.
+    //
+    // What keeps a fresh install from locking ITSELF out is ORDERING, not a
+    // warning: `applyRegistrationControls` runs AFTER `bootstrapUsers`, so
+    // `BOOTSTRAP_USERS` onboards the first administrator through the signup
+    // route while it is still open and the lock lands behind it. See that
+    // function's comment for why the reverse order self-locks.
+    // (`validateConfig`'s lockout warning does NOT cover this case: it only
+    // fires when `config.users.length === 0`, and the dangerous combination
+    // is disabled-WITH-users-configured, where the users exist to be created
+    // and the refusal would be silent.)
+    //
+    // The lock is structural for a BOOTSTRAP-ENABLED deploy only. A
+    // `BOOTSTRAP_ENABLE=false` deploy never reaches this entrypoint at all
+    // (`startup.ts`), writes no config row, and `configService`'s readers
+    // treat a missing row as `false`, so such a deploy keeps upstream's
+    // open-by-absent-row behaviour and has to close registration by hand in
+    // the admin UI.
     disableUiRegistration: parseBool(
       process.env.BOOTSTRAP_DISABLE_REGISTRATION_UI,
-      false,
+      true,
     ),
     disableSsoRegistration: parseBool(
       process.env.BOOTSTRAP_DISABLE_REGISTRATION_SSO,
-      false,
+      true,
     ),
 
     // Array configurations
@@ -235,6 +494,137 @@ async function getConfigValue(key: string): Promise<string | null> {
     where: eq(configTable.id, key),
   });
   return row?.value ?? null;
+}
+
+/**
+ * Read a registration-control flag for the `old_value` half of an audit row,
+ * in the SAME shape the UI setter records it (`trpc/config.impl.ts` ->
+ * `previousValue`), so a bootstrap row and an administrator's row are
+ * comparable in the ledger rather than two different encodings of the same
+ * fact.
+ *
+ * A missing row is `false`, not `null`: that is exactly what
+ * `configService.isSignupDisabled()` reports for it, and it is the honest
+ * reading — no row means the control was never engaged. `null` is reserved
+ * for a read that FAILED, which then compares unequal to any boolean and so
+ * makes the change-detection assume-changed. Over-reporting one redundant row
+ * after a database blip is the cheap failure; losing the row that says
+ * registration was reopened at boot is not.
+ */
+async function readRegistrationFlag(key: string): Promise<boolean | null> {
+  try {
+    return (await getConfigValue(key)) === "true";
+  } catch (err) {
+    // Said out loud, because the resulting audit row is degraded: it will
+    // carry `old_value: null` and be emitted even if nothing moved, so the
+    // log line is what tells an investigator the null is a failed read rather
+    // than a state the flag was ever in.
+    console.warn(
+      `⚠️ Failed to read current ${key} for the registration-control audit; assuming changed:`,
+      err,
+    );
+    return null;
+  }
+}
+
+/**
+ * Apply the two registration controls (applied every run), leaving an audit
+ * row for any flag this boot actually moved.
+ *
+ * WHAT MAKES THE FAIL-CLOSED DEFAULT SAFE IS NOT THIS FUNCTION'S POSITION.
+ * `ensureUser` creates its accounts by POSTing to Better Auth's own
+ * `/api/auth/sign-up/email` through `auth.handler`, which runs the
+ * `databaseHooks.user.create.before` hook in `auth.ts`, and that hook THROWS
+ * while `DISABLE_SIGNUP` is `true`. Because these writes PERSIST, the flag is
+ * already stored `true` at the top of every boot after the first, so no
+ * ordering inside a single boot can keep bootstrap out of its own refusal. The
+ * actual fix is the bootstrap exemption in
+ * `lib/bootstrap-signup-override.ts`: the entrypoint opens it around the
+ * bootstrap user pass and closes it in a `finally`, so bootstrap can create (or
+ * recreate) its administrators no matter what the stored flag says, while every
+ * request that arrives over HTTP still meets the closed gate.
+ *
+ * CALL THIS AFTER `bootstrapUsers` ANYWAY. The ordering is no longer what
+ * carries the property, but it is the cheap second line: it keeps the stored
+ * flag from moving until the accounts this boot is responsible for exist, so a
+ * future change that drops or misplaces the exemption degrades to a failed
+ * first boot rather than to a delete-then-refuse on an established deploy.
+ * There is no reachable gap either way: the whole sequence runs inside
+ * `initializeOnStartup()`, which `index.ts` awaits BEFORE `app.listen()`, so no
+ * request can arrive while any of it is in flight.
+ *
+ * These two writes are the same authority as the admin UI's signup toggles,
+ * exercised by the environment instead of by a person: a container restart
+ * carrying a changed (or newly absent) BOOTSTRAP_DISABLE_REGISTRATION_* can
+ * flip who may create an account, and until now it did so with no durable
+ * evidence at all, the only trace being the config row's `updated_at`. They
+ * therefore emit the SAME per-key `config.*.set` actions the UI setters emit
+ * (`trpc/config.impl.ts`), so an investigation reads one timeline instead of
+ * correlating audit rows against container logs. `source: "bootstrap_env"` is
+ * what separates the two origins; the absent actor is what makes the row
+ * `actor_type: "system"` rather than a phantom administrator.
+ *
+ * Only a genuine CHANGE is recorded. Bootstrap re-asserts both flags on EVERY
+ * start, so emitting unconditionally would bury the one restart that moved a
+ * flag under a row per restart that did not.
+ */
+async function applyRegistrationControls(config: EnvConfig): Promise<void> {
+  console.log("🔧 Setting registration controls...");
+  try {
+    const key = ConfigKeyEnum.enum.DISABLE_SIGNUP;
+    const next = config.disableUiRegistration;
+    const previous = await readRegistrationFlag(key);
+    await upsertConfig(
+      key,
+      next.toString(),
+      "Whether new user signup is disabled",
+    );
+    // After the write, never before: a row claiming signup was reopened by a
+    // call that then threw would be worse than no row at all.
+    if (previous !== next) {
+      emitAdminEvent(undefined, {
+        action: "config.signup_disabled.set",
+        target_type: "config_key",
+        target_id: key,
+        detail: {
+          old_value: previous,
+          new_value: next,
+          source: "bootstrap_env",
+        },
+      });
+    }
+  } catch (err) {
+    console.warn("⚠️ Failed to set UI registration control:", err);
+  }
+
+  try {
+    const key = ConfigKeyEnum.enum.DISABLE_SSO_SIGNUP;
+    const next = config.disableSsoRegistration;
+    const previous = await readRegistrationFlag(key);
+    await upsertConfig(
+      key,
+      next.toString(),
+      "Whether new user signup via SSO/OAuth is disabled",
+    );
+    if (previous !== next) {
+      emitAdminEvent(undefined, {
+        action: "config.sso_signup_disabled.set",
+        target_type: "config_key",
+        target_id: key,
+        detail: {
+          old_value: previous,
+          new_value: next,
+          source: "bootstrap_env",
+        },
+      });
+    }
+  } catch (err) {
+    console.warn("⚠️ Failed to set SSO registration control:", err);
+  }
+
+  console.log(
+    `✓ Registration controls set: UI=${!config.disableUiRegistration}, SSO=${!config.disableSsoRegistration}`,
+  );
 }
 
 async function shouldSkipBootstrap(config: EnvConfig): Promise<boolean> {
@@ -321,6 +711,25 @@ async function recordPasswordFingerprint(
 }
 
 /**
+ * Loud notice for the worst recreate outcome: the user's API keys were
+ * already DELETED (the recreate path removes them before sign-up) but the
+ * user never came back, so the deferred restore will never run for them —
+ * N credentials died behind an otherwise generic sign-up warning. Key
+ * NAMES only, never values: the values are secrets and are gone anyway.
+ */
+function warnPreservedKeysUnrestorable(
+  email: string,
+  preservedKeys: PreservedApiKey[] | undefined,
+): void {
+  if (!preservedKeys || preservedKeys.length === 0) return;
+  console.warn(
+    `⚠️ ${preservedKeys.length} preserved API key(s) for ${email} were deleted by the recreate but CANNOT be restored because the user was not recreated: ${preservedKeys
+      .map((k) => k.name)
+      .join(", ")}. Re-mint them once the user exists again.`,
+  );
+}
+
+/**
  * Ensure a single user exists.
  */
 async function ensureUser(
@@ -330,6 +739,14 @@ async function ensureUser(
   userId?: string;
   email: string;
   recreated: boolean;
+  /**
+   * Keys captured before the recreate delete. Restoring them is DEFERRED to
+   * `restorePreservedApiKeys`, which the bootstrap entrypoint runs AFTER
+   * `bootstrapEndpoints`: the user delete cascades user-owned endpoints
+   * away and they come back with fresh uuids, so a scoped key can only be
+   * restored once the endpoints exist again (re-resolved by name).
+   */
+  preservedApiKeys?: PreservedApiKey[];
 }> {
   const email = userConfig.email;
   const password = userConfig.password;
@@ -349,9 +766,7 @@ async function ensureUser(
     config.recreateDefaultUser,
   );
 
-  let preservedUserApiKeys:
-    | { name: string; key: string; is_active: boolean }[]
-    | undefined;
+  let preservedUserApiKeys: PreservedApiKey[] | undefined;
 
   let recreated = false;
 
@@ -363,14 +778,84 @@ async function ensureUser(
 
     if (config.preserveApiKeysOnRecreate) {
       try {
-        preservedUserApiKeys = await db
+        // Second users join, aliased: acts_as_user_id → the acted-as user's
+        // CURRENT email — the stable handle the deferred restore re-resolves
+        // the binding against (the user id minted by the recreate's sign-up
+        // is different, so the preserved id is stale by restore time).
+        const actsAsUsers = alias(usersTable, "acts_as_users");
+        // The capture must cover BOTH edges into the doomed user row:
+        // keys the user OWNS (user_id) — the restorable set — and keys that
+        // merely ACT AS them (acts_as_user_id, migration 0024) while being
+        // owned elsewhere (public or another user). The latter die via the
+        // acts_as FK's ON DELETE CASCADE when the user row is deleted below;
+        // they cannot be restored (an identity-bound key must be owned by
+        // the identity it exercises — post-round-2 rule; such rows predate
+        // it), but their destruction must be LOUD, never silent.
+        const capturedRows = await db
           .select({
             name: apiKeysTable.name,
-            key: apiKeysTable.key,
+            // The at-rest pair, captured together — see PreservedApiKey.
+            key_hash: apiKeysTable.key_hash,
+            last4: apiKeysTable.last4,
             is_active: apiKeysTable.is_active,
+            user_id: apiKeysTable.user_id,
+            // Load-bearing pair: `endpoint_uuid` marks the key as scoped and
+            // `endpoint_name` (left join — NULL for unscoped keys) is the
+            // stable handle the deferred restore re-resolves the scope
+            // against, because this uuid goes stale the moment the user
+            // delete below cascades user-owned endpoints away.
+            endpoint_uuid: apiKeysTable.endpoint_uuid,
+            endpoint_name: endpointsTable.name,
+            // Same split of roles for the identity binding (see the
+            // PreservedApiKey doc comment).
+            acts_as_user_id: apiKeysTable.acts_as_user_id,
+            acts_as_email: actsAsUsers.email,
+            // Plane flag (migration 0038): preserved verbatim so a control-plane
+            // (CI) key is not silently demoted to a data-plane key on recreate.
+            admin_plane: apiKeysTable.admin_plane,
           })
           .from(apiKeysTable)
-          .where(eq(apiKeysTable.user_id, existing.id));
+          .leftJoin(
+            endpointsTable,
+            eq(apiKeysTable.endpoint_uuid, endpointsTable.uuid),
+          )
+          .leftJoin(
+            actsAsUsers,
+            eq(apiKeysTable.acts_as_user_id, actsAsUsers.id),
+          )
+          .where(
+            or(
+              eq(apiKeysTable.user_id, existing.id),
+              eq(apiKeysTable.acts_as_user_id, existing.id),
+            ),
+          );
+
+        const ownedKeys: PreservedApiKey[] = [];
+        const foreignBoundKeyNames: string[] = [];
+        for (const row of capturedRows) {
+          if (row.user_id === existing.id) {
+            ownedKeys.push({
+              name: row.name,
+              key_hash: row.key_hash,
+              last4: row.last4,
+              is_active: row.is_active,
+              endpoint_uuid: row.endpoint_uuid ?? null,
+              endpoint_name: row.endpoint_name ?? null,
+              acts_as_user_id: row.acts_as_user_id ?? null,
+              acts_as_email: row.acts_as_email ?? null,
+              admin_plane: row.admin_plane,
+            });
+          } else {
+            foreignBoundKeyNames.push(row.name);
+          }
+        }
+        preservedUserApiKeys = ownedKeys;
+
+        if (foreignBoundKeyNames.length > 0) {
+          console.warn(
+            `⚠️ ${foreignBoundKeyNames.length} API key(s) bound to ${email}'s identity but NOT owned by them (public or another user's) will be DELETED by the recreate cascade and CANNOT be restored — an identity-bound key must be owned by the identity it exercises: ${foreignBoundKeyNames.join(", ")}. Re-mint compliant keys if still needed.`,
+          );
+        }
       } catch (err) {
         console.warn(`⚠️ Failed to preserve API keys for ${email}:`, err);
       }
@@ -422,6 +907,8 @@ async function ensureUser(
           body ? `Response: ${body}` : ""
         }`,
       );
+      // The keys were deleted above; without a user there is no restore.
+      warnPreservedKeysUnrestorable(email, preservedUserApiKeys);
       return { email, recreated };
     }
   }
@@ -432,6 +919,8 @@ async function ensureUser(
 
   if (!user) {
     console.warn(`⚠️ User ${email} not found after signup; skipping.`);
+    // Same credential-loss case as the sign-up failure above.
+    warnPreservedKeysUnrestorable(email, preservedUserApiKeys);
     return { email, recreated };
   }
 
@@ -449,32 +938,12 @@ async function ensureUser(
     console.warn(`⚠️ Failed to update user metadata for ${email}:`, err);
   }
 
-  // Restore preserved keys if recreated
-  if (recreated && config.preserveApiKeysOnRecreate && preservedUserApiKeys) {
-    for (const k of preservedUserApiKeys) {
-      try {
-        await db
-          .insert(apiKeysTable)
-          .values({
-            name: k.name,
-            key: k.key,
-            user_id: user.id,
-            is_active: k.is_active,
-          })
-          .onConflictDoUpdate({
-            target: [apiKeysTable.user_id, apiKeysTable.name],
-            set: { key: k.key, is_active: k.is_active },
-          });
-      } catch (err) {
-        console.warn(
-          `⚠️ Failed to restore preserved API key for ${email}:`,
-          err,
-        );
-      }
-    }
-
-    console.log(`✓ Restored preserved API keys for recreated user ${email}`);
-  }
+  // NOTE: preserved keys are deliberately NOT restored here. The restore
+  // must run AFTER `bootstrapEndpoints` (see `restorePreservedApiKeys`):
+  // inserting the preserved `endpoint_uuid` at this point violates the
+  // `api_keys.endpoint_uuid → endpoints.uuid` FK for any key scoped to a
+  // user-owned endpoint (cascaded away by the user delete above), which is
+  // exactly the silent-loss-reported-as-success bug this ordering fixes.
 
   // Record fingerprint when we actually create/recreate
   if (!existing || recreated) {
@@ -482,20 +951,39 @@ async function ensureUser(
   }
 
   console.log(`✓ User ready: ${email}`);
-  return { userId: user.id, email, recreated };
+  return {
+    userId: user.id,
+    email,
+    recreated,
+    preservedApiKeys:
+      recreated && config.preserveApiKeysOnRecreate
+        ? preservedUserApiKeys
+        : undefined,
+  };
 }
+
+/** Preserved keys awaiting the post-`bootstrapEndpoints` restore pass. */
+type PendingApiKeyRestore = {
+  userId: string;
+  email: string;
+  keys: PreservedApiKey[];
+};
 
 /**
  * Bootstrap all users from configuration.
  */
-async function bootstrapUsers(config: EnvConfig): Promise<Map<string, string>> {
+async function bootstrapUsers(config: EnvConfig): Promise<{
+  userMap: Map<string, string>;
+  pendingApiKeyRestores: PendingApiKeyRestore[];
+}> {
   const userMap = new Map<string, string>(); // email -> userId
+  const pendingApiKeyRestores: PendingApiKeyRestore[] = [];
 
   if (!config.users || config.users.length === 0) {
     console.warn(
       "⚠️ No users configured for bootstrap (BOOTSTRAP_USERS is empty and no single user config found)",
     );
-    return userMap;
+    return { userMap, pendingApiKeyRestores };
   }
 
   console.log(`👥 Bootstrapping ${config.users.length} user(s)...`);
@@ -510,13 +998,146 @@ async function bootstrapUsers(config: EnvConfig): Promise<Map<string, string>> {
       const result = await ensureUser(userConfig, config);
       if (result.userId) {
         userMap.set(result.email, result.userId);
+        if (result.preservedApiKeys && result.preservedApiKeys.length > 0) {
+          pendingApiKeyRestores.push({
+            userId: result.userId,
+            email: result.email,
+            keys: result.preservedApiKeys,
+          });
+        }
       }
     } catch (err) {
       console.warn(`⚠️ Failed to bootstrap user ${userConfig.email}:`, err);
     }
   }
 
-  return userMap;
+  return { userMap, pendingApiKeyRestores };
+}
+
+/**
+ * Restore the API keys preserved across a `BOOTSTRAP_RECREATE_USER` delete.
+ * MUST run after `bootstrapEndpoints`: the user delete cascades user-owned
+ * endpoints away and `bootstrapEndpoints` recreates them with FRESH uuids,
+ * so each scoped key's endpoint NAME is re-resolved against the CURRENT
+ * endpoint set here. A scoped key whose endpoint no longer exists is
+ * skipped LOUDLY — never restored gateway-wide, never reported as restored.
+ *
+ * Ordering note: `bootstrapApiKeys` (config-declared keys) has already run
+ * by now. On a name collision the preserved key wins via
+ * `onConflictDoUpdate` — the same net result as the pre-fix order, where
+ * the restore ran first and `bootstrapApiKeys` skipped the existing name.
+ */
+async function restorePreservedApiKeys(
+  pending: PendingApiKeyRestore[],
+): Promise<void> {
+  if (pending.length === 0) return;
+
+  let endpointUuidByName: Map<string, string>;
+  try {
+    const endpointRows = await db
+      .select({ uuid: endpointsTable.uuid, name: endpointsTable.name })
+      .from(endpointsTable);
+    endpointUuidByName = new Map(
+      endpointRows.map((row) => [row.name, row.uuid]),
+    );
+  } catch (err) {
+    const total = pending.reduce((sum, p) => sum + p.keys.length, 0);
+    console.warn(
+      `⚠️ Failed to load endpoints for API key restore — ${total} preserved key(s) NOT restored (restoring blind could widen a scoped key to gateway-wide):`,
+      err,
+    );
+    return;
+  }
+
+  // The acted-as email → CURRENT user id map, for re-binding identity-bound
+  // keys (migration 0024). Loaded only when some preserved key actually
+  // carries a binding — and, symmetrically with the endpoints load above,
+  // a failed load aborts the restore LOUDLY rather than restoring blind
+  // (an unbound restore of a bound key is silent degradation; a guessed
+  // binding is worse).
+  let userIdByEmail: Map<string, string> = new Map();
+  const anyBound = pending.some((p) =>
+    p.keys.some((k) => k.acts_as_user_id !== null),
+  );
+  if (anyBound) {
+    try {
+      const userRows = await db
+        .select({ id: usersTable.id, email: usersTable.email })
+        .from(usersTable);
+      userIdByEmail = new Map(userRows.map((row) => [row.email, row.id]));
+    } catch (err) {
+      const total = pending.reduce((sum, p) => sum + p.keys.length, 0);
+      console.warn(
+        `⚠️ Failed to load users for API key restore — ${total} preserved key(s) NOT restored (identity-bound keys cannot be re-bound without the email → user map):`,
+        err,
+      );
+      return;
+    }
+  }
+
+  for (const { userId, email, keys } of pending) {
+    const plan = planPreservedApiKeyRestores(
+      keys,
+      userId,
+      endpointUuidByName,
+      userIdByEmail,
+    );
+
+    let restored = 0;
+    let failed = 0;
+    for (const values of plan.restores) {
+      try {
+        await db
+          .insert(apiKeysTable)
+          .values(values)
+          .onConflictDoUpdate({
+            target: [apiKeysTable.user_id, apiKeysTable.name],
+            set: {
+              // The at-rest pair moves together: restoring the hash without
+              // its tail would leave the row unidentifiable in the UI, and
+              // restoring the tail without the hash would leave a key that
+              // authenticates nothing.
+              key_hash: values.key_hash,
+              last4: values.last4,
+              is_active: values.is_active,
+              // Restore the scope on conflict too, otherwise a pre-existing
+              // row could keep a stale (or NULL) scope.
+              endpoint_uuid: values.endpoint_uuid,
+              // Same for the identity binding — a conflicting row must not
+              // keep a stale (or NULL) acts-as identity.
+              acts_as_user_id: values.acts_as_user_id,
+              // Restore the plane too (migration 0038): a conflicting row must
+              // not keep a stale plane, or a preserved control-plane key could
+              // silently come back as a data-plane key.
+              admin_plane: values.admin_plane,
+            },
+          });
+        restored++;
+      } catch (err) {
+        failed++;
+        console.warn(
+          `⚠️ Failed to restore preserved API key "${values.name}" for ${email}:`,
+          err,
+        );
+      }
+    }
+
+    for (const skip of plan.skipped) {
+      if (skip.reason === "acts_as_unresolvable") {
+        console.warn(
+          `⚠️ Preserved API key "${skip.keyName}" for ${email} was bound to acts-as identity "${skip.actsAsEmail ?? "unknown (email not captured)"}", which cannot be resolved to a current user after the recreate — key NOT restored (restoring it unbound would silently degrade an identity key; restoring with a guessed identity is worse). Re-mint it against the intended user.`,
+        );
+      } else {
+        console.warn(
+          `⚠️ Preserved API key "${skip.keyName}" for ${email} was scoped to endpoint "${skip.endpointName ?? `uuid ${skip.endpointUuid}`}", which no longer exists after the recreate — key NOT restored (a NULL-scope restore would widen it to gateway-wide). Re-mint it against the intended endpoint.`,
+        );
+      }
+    }
+
+    console.log(
+      `✓ API key restore for recreated user ${email}: ${restored} restored, ${plan.skipped.length} skipped${failed > 0 ? `, ${failed} FAILED` : ""} (of ${keys.length} preserved)`,
+    );
+  }
 }
 
 async function maybeDeleteOtherUsers(
@@ -546,11 +1167,37 @@ async function maybeDeleteOtherUsers(
 }
 
 /**
+ * Identity of a key a deferred preserved-key restore will overwrite:
+ * restores upsert on the (user_id, name) unique pair, so that pair is the
+ * collision key. NUL separator — it cannot appear in either component.
+ */
+function pendingRestoreKeyId(userId: string, name: string): string {
+  return `${userId}\u0000${name}`;
+}
+
+/**
  * Bootstrap API keys from configuration array.
+ *
+ * Each entry must carry its own `key` value. Migration 0034 stores only a
+ * hash, so bootstrap can no longer invent a key: the value would be
+ * unreadable from every surface the moment it was written. An entry without
+ * one is SKIPPED with a warning naming the remedy — see the create branch
+ * below for why refusing beats minting.
+ *
+ * `pendingRestoreKeyIds` names the (user_id, name) pairs that
+ * `restorePreservedApiKeys` will upsert LATER in the run (it runs after
+ * `bootstrapEndpoints`; this runs before). A config-declared key that
+ * collides with a pending restore is still minted — if the restore then
+ * fails, a working key beats none — but its log line must not present the
+ * fresh masked value as the live credential, because the restore's
+ * `onConflictDoUpdate` replaces it moments later. Without the amendment
+ * the log said "Created ... : <mask>" and the mask was never the value
+ * that survives startup.
  */
 async function bootstrapApiKeys(
   config: EnvConfig,
   userMap: Map<string, string>,
+  pendingRestoreKeyIds: ReadonlySet<string> = new Set(),
 ): Promise<void> {
   if (!config.apiKeys || config.apiKeys.length === 0) {
     console.log(
@@ -566,6 +1213,20 @@ async function bootstrapApiKeys(
       const name = apiKeyConfig.name;
       const isPublic = apiKeyConfig.is_public ?? false;
       const ownerEmail = getOwnerEmail(apiKeyConfig);
+
+      // Validated before any owner resolution or write: an unusable value
+      // must stop this entry outright, never fall back to a generated one.
+      let configuredKey: string | undefined;
+      if (apiKeyConfig.key !== undefined) {
+        const validated = validateConfiguredApiKey(apiKeyConfig.key);
+        if (!validated.ok) {
+          console.warn(
+            `⚠️ Skipping API key "${name}" because ${validated.reason}`,
+          );
+          continue;
+        }
+        configuredKey = validated.key;
+      }
 
       let userId: string | null = null;
 
@@ -601,27 +1262,88 @@ async function bootstrapApiKeys(
         where: whereCondition,
       });
 
+      const ownerInfo = userId
+        ? `for user ${ownerEmail ?? Array.from(userMap.keys())[0]}`
+        : "(public)";
+      const restorePending =
+        userId !== null &&
+        pendingRestoreKeyIds.has(pendingRestoreKeyId(userId, name));
+
       if (!existing) {
-        const key = generateApiKey();
+        if (!configuredKey) {
+          // Since migration 0034 only a hash is stored, and the product has
+          // no rotate surface (`apiKeysImplementations` exposes
+          // create/list/update/delete/validate, and update carries name and
+          // is_active only). A value generated here would therefore land in
+          // a row that NO surface can ever return — not the boot log, not
+          // the API, not the UI — and bootstrap would print "✓ Created" over
+          // a credential nobody can use and nobody can repair except by
+          // deleting the row. Refuse loudly and name the remedy instead:
+          // this is the one case where doing less is the honest outcome.
+          console.warn(
+            `⚠️ Skipping API key "${name}": BOOTSTRAP_API_KEYS entries must carry a "key" value. Only a hash of the key is stored, so a value generated here could never be shown to you and the key would be unusable. Add "key": "<a secret you generate, at least ${MIN_CONFIGURED_API_KEY_LENGTH} characters>" to this entry, or create the key in the UI, which displays it once.`,
+          );
+          continue;
+        }
+
         await db.insert(apiKeysTable).values({
           name,
-          key,
+          // Hashed through the SAME shared helper the repository mint and the
+          // authentication lookup use. This insert bypasses
+          // ApiKeysRepository.create(), so a local hash here would be the
+          // classic two-encodings bug: the key prints fine at boot and then
+          // never authenticates.
+          key_hash: hashApiKey(configuredKey),
+          last4: apiKeyLast4(configuredKey),
           user_id: userId,
           is_active: true,
         });
 
-        const ownerInfo = userId
-          ? `for user ${ownerEmail ?? Array.from(userMap.keys())[0]}`
-          : "(public)";
+        if (restorePending) {
+          // Log truth: the value written here is NOT the one that survives
+          // startup — the deferred restore overwrites it. Never print this
+          // mask as if it were the live credential.
+          console.log(
+            `✓ Created ${isPublic ? "public" : "private"} API key "${name}" ${ownerInfo} (placeholder — a preserved-key restore for this name is pending and will overwrite it; the restored value is the live one)`,
+          );
+        } else {
+          // Masked, never whole: the operator supplied this value and already
+          // holds it, so printing it in full would put a live credential in
+          // the boot log for no gain.
+          console.log(
+            `✓ Created ${isPublic ? "public" : "private"} API key "${name}" ${ownerInfo}: ${maskKey(configuredKey)}`,
+          );
+        }
+      } else if (
+        configuredKey &&
+        existing.key_hash !== hashApiKey(configuredKey)
+      ) {
+        // The configured value is authoritative, and re-asserting it is the
+        // ONLY way back from an unreadable key: rows minted before this field
+        // existed hold a value no surface can return and no endpoint can
+        // rotate, so ignoring the config here would leave the operator with a
+        // dead row and no repair short of deleting it. Re-declaring a key in
+        // BOOTSTRAP_API_KEYS is therefore also how a key is rotated.
+        await db
+          .update(apiKeysTable)
+          .set({
+            key_hash: hashApiKey(configuredKey),
+            last4: apiKeyLast4(configuredKey),
+          })
+          .where(eq(apiKeysTable.uuid, existing.uuid));
         console.log(
-          `✓ Created ${isPublic ? "public" : "private"} API key "${name}" ${ownerInfo}: ${maskKey(key)}`,
+          `✓ ${isPublic ? "Public" : "Private"} API key "${name}" ${ownerInfo} updated to the value configured in BOOTSTRAP_API_KEYS: ${maskKey(configuredKey)}${
+            restorePending
+              ? " (a preserved-key restore for this name is pending and will overwrite it)"
+              : ""
+          }`,
         );
       } else {
-        const ownerInfo = userId
-          ? `for user ${ownerEmail ?? Array.from(userMap.keys())[0]}`
-          : "(public)";
+        // The stored row holds no key to mask (migration 0034) — only the
+        // display tail, rendered the same way the API's key_prefix is so the
+        // boot log and the UI name the same key the same way.
         console.log(
-          `✓ ${isPublic ? "Public" : "Private"} API key "${name}" ${ownerInfo} already exists: ${maskKey(existing.key)}`,
+          `✓ ${isPublic ? "Public" : "Private"} API key "${name}" ${ownerInfo} already exists: sk_mt_…${existing.last4}`,
         );
       }
     } catch (err) {
@@ -874,6 +1596,92 @@ async function bootstrapEndpoints(
   }
 }
 
+/**
+ * Warn, loudly, if a bootstrap account is being created with a password this
+ * repository publishes. Returns whether it warned, so a test can assert the
+ * warning rather than the predicate behind it.
+ *
+ * The placeholder set and signing-key constant live in `./shipped-placeholders`
+ * so `auth.ts` can share them without an import cycle (that module imports this
+ * one). This is the dev-facing half: outside production a placeholder is a loud
+ * warning so a throwaway local stack still boots; production refuses instead
+ * (see `validateConfig` and `auth.ts`).
+ *
+ * Exported for that test only; `validateConfig` below is the sole production
+ * caller and covers every configured user, so `BOOTSTRAP_USERS` entries are
+ * checked on the same footing as the single-user `BOOTSTRAP_USER_PASSWORD`.
+ */
+export function warnOnPlaceholderBootstrapPassword(
+  email: string | undefined,
+  password: string | undefined,
+): boolean {
+  if (!password || !SHIPPED_PLACEHOLDER_PASSWORDS.has(password)) return false;
+
+  console.warn(
+    "==============================================================",
+  );
+  console.warn(
+    `⚠️ INSECURE BOOTSTRAP PASSWORD: user ${email ?? "(no email)"} is configured ` +
+      `with a placeholder password published in example.env.`,
+  );
+  console.warn(
+    "     This is an ADMINISTRATOR account on this gateway and anyone who has " +
+      "read the repository knows this password.",
+  );
+  console.warn(
+    "     Set BOOTSTRAP_USER_PASSWORD (or the password in BOOTSTRAP_USERS) to " +
+      "a real secret and restart.",
+  );
+  console.warn(
+    "==============================================================",
+  );
+  return true;
+}
+
+/**
+ * The signing-key twin of the check above, and the reason it is a SEPARATE
+ * function rather than another entry in the set.
+ *
+ * `BETTER_AUTH_SECRET` is not a password: it signs session cookies and the
+ * OAuth consent requests. Someone who knows it does not need to guess a
+ * password at all, they can mint a valid session for any account, so the
+ * remedy sentence and the severity are different from a bootstrap password's
+ * and the message has to say so.
+ *
+ * A WARNING rather than a refusal, matching its sibling: `auth.ts` already
+ * throws when the variable is absent, and the case being addressed here is an
+ * operator who copied `example.env` and edited the lines they noticed. Refusing
+ * to boot would brick a throwaway local stack over a value that is fine there.
+ *
+ * Returns whether it warned so a test can assert the warning rather than the
+ * predicate behind it.
+ */
+export function warnOnPlaceholderAuthSecret(
+  secret: string | undefined,
+): boolean {
+  if (secret !== SHIPPED_PLACEHOLDER_AUTH_SECRET) return false;
+
+  console.warn(
+    "==============================================================",
+  );
+  console.warn(
+    "⚠️ INSECURE BETTER_AUTH_SECRET: the gateway is signing sessions with " +
+      "the placeholder published in example.env.",
+  );
+  console.warn(
+    "     Anyone who has read the repository can mint a session cookie for " +
+      "ANY account on this gateway without a password.",
+  );
+  console.warn(
+    "     Generate one with `openssl rand -hex 32`, set BETTER_AUTH_SECRET " +
+      "and restart. Existing sessions are invalidated by the change.",
+  );
+  console.warn(
+    "==============================================================",
+  );
+  return true;
+}
+
 function validateConfig(config: EnvConfig): void {
   if (
     config.disableUiRegistration &&
@@ -893,18 +1701,48 @@ function validateConfig(config: EnvConfig): void {
 
   // Validate users
   for (const user of config.users) {
+    // Production hard guard: this account is created as an
+    // administrator, so a placeholder or sub-8-character password in production
+    // would stand up an admin whose credential is published in the repository
+    // or trivially guessable. Refuse it rather than warn. Outside production
+    // the warn-only path below still runs, so a throwaway local stack boots.
+    // A throw here aborts the bootstrap pass, so the insecure account is never
+    // created; whether the process then exits is governed by BOOTSTRAP_FAIL_HARD
+    // (see lib/startup). The signing-key twin of this guard is fatal
+    // unconditionally at module load in auth.ts, because a placeholder there is
+    // a running-gateway total-bypass rather than a bootstrap-config problem.
+    if (
+      shouldRefuseBootstrapPasswordInProduction(
+        user.password,
+        process.env.NODE_ENV,
+      )
+    ) {
+      throw new Error(
+        `Refusing to create bootstrap user ${user.email ?? "(no email)"} in ` +
+          `production: the password is a placeholder published in example.env ` +
+          `or is fewer than ${MIN_BOOTSTRAP_PASSWORD_LENGTH} characters. Set a ` +
+          `real BOOTSTRAP_USER_PASSWORD (or the password in BOOTSTRAP_USERS) ` +
+          `and restart.`,
+      );
+    }
     if (!user.email || user.email.trim() === "") {
       console.warn("⚠️ User configuration is missing 'email' field");
     }
     if (!user.password || user.password.trim() === "") {
       console.warn(`⚠️ User ${user.email} is missing 'password' field`);
     }
-    if (user.password && user.password.length < 8) {
+    if (user.password && user.password.length < MIN_BOOTSTRAP_PASSWORD_LENGTH) {
       console.warn(
-        `⚠️ Password for ${user.email} is less than 8 characters. Consider using a stronger password.`,
+        `⚠️ Password for ${user.email} is less than ${MIN_BOOTSTRAP_PASSWORD_LENGTH} characters. Consider using a stronger password.`,
       );
     }
+    warnOnPlaceholderBootstrapPassword(user.email, user.password);
   }
+
+  // Read here rather than taken from `config`, because this is not bootstrap
+  // configuration: it is the running gateway's signing key, and it matters
+  // even on a deployment that configures no bootstrap users at all.
+  warnOnPlaceholderAuthSecret(process.env.BETTER_AUTH_SECRET);
 
   if (config.recreateDefaultUser && !config.preserveApiKeysOnRecreate) {
     console.warn(
@@ -985,46 +1823,46 @@ export async function initializeEnvironmentConfiguration(): Promise<void> {
 
   validateConfig(config);
 
-  // Registration controls (applied every run)
-  console.log("🔧 Setting registration controls...");
-  try {
-    await upsertConfig(
-      ConfigKeyEnum.enum.DISABLE_SIGNUP,
-      config.disableUiRegistration.toString(),
-      "Whether new user signup is disabled",
-    );
-  } catch (err) {
-    console.warn("⚠️ Failed to set UI registration control:", err);
-  }
-
-  try {
-    await upsertConfig(
-      ConfigKeyEnum.enum.DISABLE_SSO_SIGNUP,
-      config.disableSsoRegistration.toString(),
-      "Whether new user signup via SSO/OAuth is disabled",
-    );
-  } catch (err) {
-    console.warn("⚠️ Failed to set SSO registration control:", err);
-  }
-
-  console.log(
-    `✓ Registration controls set: UI=${!config.disableUiRegistration}, SSO=${!config.disableSsoRegistration}`,
-  );
-
   // One-time bootstrap guard
   const skipBootstrap = await shouldSkipBootstrap(config);
   if (skipBootstrap) {
+    // A guarded boot creates no users, so there is no create-before-lock
+    // ordering to honour here; the flags are still asserted because they are
+    // "applied every run" controls, and skipping them would leave a
+    // BOOTSTRAP_ONLY_FIRST_RUN deploy's registration state wherever the last
+    // unguarded boot (or an administrator) happened to leave it.
+    await applyRegistrationControls(config);
     console.log("✅ Environment-based configuration initialized (guarded)");
     return;
   }
 
-  // Bootstrap all users
+  // Bootstrap all users, with the signup gate held open for this pass ONLY.
+  //
+  // `ensureUser` onboards through Better Auth's `/api/auth/sign-up/email`, the
+  // very route `DISABLE_SIGNUP` closes, and this fork stores that flag `true`,
+  // so from the second boot onward the gate would refuse bootstrap its own
+  // administrator. With BOOTSTRAP_RECREATE_USER=true the delete has already
+  // happened by then, which is how a plain restart ends up with no admin and no
+  // connector keys. The exemption is what prevents that; the `finally` is what
+  // keeps it from outliving this pass NO MATTER HOW THAT PASS ENDS. `finally`
+  // rather than a clear after the block, which today would be equivalent only
+  // because the catch below swallows: a failure inside the error handling
+  // itself, or a future change that rethrows, would skip a trailing clear and
+  // leave the gate open for the life of the process.
+  // Nothing is listening yet (see `initializeOnStartup` / `app.listen`), so the
+  // window is not reachable from outside the process. Full argument:
+  // lib/bootstrap-signup-override.ts.
   let userMap: Map<string, string>;
+  let pendingApiKeyRestores: PendingApiKeyRestore[];
+  setBootstrapSignupAllowed(true);
   try {
-    userMap = await bootstrapUsers(config);
+    ({ userMap, pendingApiKeyRestores } = await bootstrapUsers(config));
   } catch (err) {
     console.warn("⚠️ Users bootstrap failed:", err);
     userMap = new Map();
+    pendingApiKeyRestores = [];
+  } finally {
+    setBootstrapSignupAllowed(false);
   }
 
   // Delete other users after bootstrapping configured users
@@ -1035,9 +1873,22 @@ export async function initializeEnvironmentConfiguration(): Promise<void> {
     console.warn("⚠️ User cleanup step failed:", err);
   }
 
-  // Bootstrap API keys
+  // Registration controls, HERE and not earlier. The bootstrap exemption above
+  // is what actually lets a closed gateway recreate its own administrator; this
+  // position is the second line behind it (see applyRegistrationControls), and
+  // it costs nothing because nothing below this line signs a user up.
+  await applyRegistrationControls(config);
+
+  // Bootstrap API keys. The pending-restore pairs let the log stay truthful
+  // for a config-declared key the deferred restore will overwrite (see
+  // bootstrapApiKeys' doc comment).
   try {
-    await bootstrapApiKeys(config, userMap);
+    const pendingRestoreIds = new Set(
+      pendingApiKeyRestores.flatMap((pending) =>
+        pending.keys.map((k) => pendingRestoreKeyId(pending.userId, k.name)),
+      ),
+    );
+    await bootstrapApiKeys(config, userMap, pendingRestoreIds);
   } catch (err) {
     console.warn("⚠️ API keys bootstrap failed:", err);
   }
@@ -1056,6 +1907,16 @@ export async function initializeEnvironmentConfiguration(): Promise<void> {
     await bootstrapEndpoints(config, namespaceMap, userMap);
   } catch (err) {
     console.warn("⚠️ Endpoints bootstrap failed:", err);
+  }
+
+  // Restore API keys preserved across a user recreate — AFTER endpoints, so
+  // scoped keys re-resolve their endpoint name to the freshly-created uuid
+  // (see restorePreservedApiKeys' doc comment for why this ordering is
+  // load-bearing).
+  try {
+    await restorePreservedApiKeys(pendingApiKeyRestores);
+  } catch (err) {
+    console.warn("⚠️ Preserved API key restore failed:", err);
   }
 
   // Mark one-time bootstrap complete

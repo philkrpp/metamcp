@@ -1,8 +1,40 @@
 import { betterFetch } from "@better-fetch/fetch";
 import { NextRequest, NextResponse } from "next/server";
 
+import { consentFormActionSources } from "./lib/consent-form-action";
+import { shouldBypassMiddleware } from "./lib/middleware-bypass";
+import {
+  buildContentSecurityPolicy,
+  NONCE_HEADER,
+} from "./lib/security-headers";
+
 const locales = ["en", "zh", "ko", "pt", "es"];
 const defaultLocale = "en";
+
+/**
+ * Pick the first supported locale from an Accept-Language header, honouring
+ * q-weights and, for equal weights, the order the client listed them in.
+ * Only the primary language subtag is compared ("pt-BR" -> "pt"), so a header
+ * like "en-US,es;q=0.5" no longer matches "es" by substring before "en".
+ */
+function localeFromAcceptLanguage(header: string): string | undefined {
+  const ranked = header
+    .split(",")
+    .map((entry, index) => {
+      const [tag = "", ...params] = entry.trim().split(";");
+      const qParam = params.find((p) => p.trim().startsWith("q="));
+      const q = qParam ? Number.parseFloat(qParam.trim().slice(2)) : 1;
+      return {
+        primary: tag.trim().toLowerCase().split("-")[0] ?? "",
+        q: Number.isFinite(q) ? q : 0,
+        index,
+      };
+    })
+    .filter((item) => item.primary && item.q > 0)
+    .sort((a, b) => b.q - a.q || a.index - b.index);
+
+  return ranked.find((item) => locales.includes(item.primary))?.primary;
+}
 
 // Get the preferred locale from the request
 function getLocale(request: NextRequest): string {
@@ -25,49 +57,82 @@ function getLocale(request: NextRequest): string {
   // Check Accept-Language header as fallback
   const acceptLanguage = request.headers.get("accept-language");
   if (acceptLanguage) {
-    // Simple language detection - look for zh in accept-language
-    if (acceptLanguage.includes("zh")) {
-      return "zh";
-    }
-
-    // Look for ko in accept-language
-    if (acceptLanguage.includes("ko")) {
-      return "ko";
-    }
-
-    // Look for pt in accept-language
-    if (acceptLanguage.includes("pt")) {
-      return "pt";
-    }
-
-    // Look for es in accept-language
-    if (acceptLanguage.includes("es")) {
-      return "es";
+    const preferred = localeFromAcceptLanguage(acceptLanguage);
+    if (preferred) {
+      return preferred;
     }
   }
 
   return defaultLocale;
 }
 
+/**
+ * Where to send an unauthenticated request, preserving the QUERY STRING.
+ *
+ * The query is not decoration on every route: the OAuth consent screen carries
+ * its whole authorization request in `?areq=`, so dropping the search string
+ * here meant a session that lapsed mid-consent sent the user back to a bare
+ * /consent with nothing to approve, and the connection had to be restarted
+ * from the client.
+ */
+function loginRedirect(
+  request: NextRequest,
+  locale: string,
+  pathnameWithoutLocale: string,
+): URL {
+  const loginUrl = new URL(`/${locale}/login`, request.url);
+  loginUrl.searchParams.set(
+    "callbackUrl",
+    `${pathnameWithoutLocale}${request.nextUrl.search}`,
+  );
+  return loginUrl;
+}
+
 export async function proxy(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
 
-  // Skip middleware for static files and API routes
-  if (
-    pathname.startsWith("/_next") ||
-    pathname.startsWith("/api/") ||
-    pathname.startsWith("/trpc") ||
-    pathname.startsWith("/mcp-proxy") ||
-    pathname.startsWith("/metamcp") ||
-    pathname.startsWith("/oauth") ||
-    pathname.startsWith("/.well-known") ||
-    pathname.startsWith("/service") ||
-    pathname.startsWith("/health") ||
-    pathname.startsWith("/fe-oauth") ||
-    pathname.includes(".")
-  ) {
+  // Skip middleware for static files and the backend/framework routes. The
+  // bypass set and its segment-boundary matching live in ./lib/middleware-bypass
+  // so the config.matcher below stays in lockstep with it (see that module for
+  // why bare-prefix matching swallowed the same-prefix /oauth-clients page).
+  if (shouldBypassMiddleware(pathname)) {
     return NextResponse.next();
   }
+
+  // Per-request CSP nonce. The policy bans inline script except by nonce, and a
+  // nonce cannot be a static next.config value, so it is minted here, the only
+  // layer that runs before the document is rendered. It is stamped on the
+  // request's CSP header (Next reads it there to nonce the framework hydration
+  // scripts) and on `x-nonce` (the root layout reads it there to nonce the
+  // third-party inline scripts Next does not own: the runtime-env script and
+  // the theme anti-flash script). See ./lib/security-headers.
+  const nonce = Buffer.from(crypto.randomUUID()).toString("base64");
+  // The consent document alone widens form-action to its redirect_uri origin:
+  // its Approve is a form POST whose success response is a 302 to the client,
+  // and Chromium enforces form-action on that redirect (see
+  // ./lib/consent-form-action for the failure this closes). Every other page
+  // keeps `form-action 'self'`.
+  const csp = buildContentSecurityPolicy(nonce, {
+    formActionSources: consentFormActionSources(
+      pathname,
+      request.nextUrl.searchParams.get("areq"),
+    ),
+  });
+  const requestHeaders = new Headers(request.headers);
+  requestHeaders.set(NONCE_HEADER, nonce);
+  requestHeaders.set("Content-Security-Policy", csp);
+
+  // A document render: carry the nonce forward to the renderer via the request
+  // headers, and the policy back to the browser on the response. Only the
+  // page-rendering branches below use this; the redirect branches return a
+  // bodyless 307 whose destination gets its own pass through this middleware.
+  const renderDocument = () => {
+    const response = NextResponse.next({
+      request: { headers: requestHeaders },
+    });
+    response.headers.set("Content-Security-Policy", csp);
+    return response;
+  };
 
   // Handle i18n routing first
   const pathnameHasLocale = locales.some(
@@ -89,10 +154,15 @@ export async function proxy(request: NextRequest) {
     return NextResponse.redirect(newUrl);
   }
 
-  // Now handle authentication for the pathname without locale
-  const publicRoutes = ["/login", "/register", "/", "/cors-error"];
+  // Now handle authentication for the pathname without locale.
+  // "/" is deliberately NOT public: an unauthenticated visitor to the root
+  // should be redirected to /login rather than served the dashboard shell,
+  // which then fires a 401 on every data query. Leaving it out routes the root
+  // through the session check below like any other protected page, so an
+  // authenticated user still gets the dashboard and everyone else gets login.
+  const publicRoutes = ["/login", "/register", "/cors-error"];
   if (publicRoutes.includes(pathnameWithoutLocale)) {
-    return NextResponse.next();
+    return renderDocument();
   }
 
   try {
@@ -119,24 +189,29 @@ export async function proxy(request: NextRequest) {
 
     if (!session) {
       // Redirect to login if not authenticated (with locale)
-      const loginUrl = new URL(`/${locale}/login`, request.url);
-      loginUrl.searchParams.set("callbackUrl", pathnameWithoutLocale);
-      return NextResponse.redirect(loginUrl);
+      return NextResponse.redirect(
+        loginRedirect(request, locale, pathnameWithoutLocale),
+      );
     }
 
-    return NextResponse.next();
+    return renderDocument();
   } catch (error) {
     console.error("Auth middleware error:", error);
     // On error, redirect to login (with locale)
-    const loginUrl = new URL(`/${locale}/login`, request.url);
-    loginUrl.searchParams.set("callbackUrl", pathnameWithoutLocale);
-    return NextResponse.redirect(loginUrl);
+    return NextResponse.redirect(
+      loginRedirect(request, locale, pathnameWithoutLocale),
+    );
   }
 }
 
 export const config = {
   matcher: [
-    // Skip all internal paths (_next, etc.)
-    "/((?!_next|api/|trpc|mcp-proxy|metamcp|oauth|fe-oauth|\\.well-known|service|health|.*\\..*).*)",
+    // Skip all internal paths (_next, etc.). Each prefix is matched on a segment
+    // boundary ((?:/|$)) so a page whose route merely shares a prefix (e.g.
+    // /oauth-clients vs the bypassed /oauth) is NOT skipped. Keep this in
+    // lockstep with shouldBypassMiddleware in ./lib/middleware-bypass. Next
+    // requires config.matcher to be a statically-analyzable literal, so it
+    // cannot import that list; middleware-bypass.test.ts cross-checks the two.
+    "/((?!_next(?:/|$)|api/|trpc(?:/|$)|mcp-proxy(?:/|$)|metamcp(?:/|$)|oauth(?:/|$)|fe-oauth(?:/|$)|\\.well-known(?:/|$)|service(?:/|$)|health(?:/|$)|m365(?:/|$)|.*\\..*).*)",
   ],
 };

@@ -36,6 +36,70 @@ run_migrations() {
     cd /app
 }
 
+# Umbrella fork: converge the optional NOSUPERUSER runtime role.
+#
+# Runs AFTER migrations and BEFORE either server process starts, and that order
+# is the whole design. Migrations are DDL and need the owner/superuser
+# credential in DATABASE_URL; the running gateway does not, and holding it is
+# what lets a compromised gateway rewrite its own audit trail (superusers
+# bypass GRANTs and can disable or drop a trigger). Granting after the
+# migration also means a table a migration created seconds ago is already in
+# `ALL TABLES IN SCHEMA public` when the grants run.
+#
+# Unset METAMCP_RUNTIME_DB_PASSWORD = the split is off and this is a no-op, so
+# an existing deployment behaves exactly as before on upgrade. A FAILURE here
+# is fatal on purpose: the alternative is booting with the superuser credential
+# while the operator believes the split is on.
+ensure_runtime_role() {
+    # Blank means UNSET, the same rule `db/runtime-connection.ts` applies. A
+    # whitespace-only value has to skip the step rather than enter it: the app
+    # will treat it as unset and keep DATABASE_URL, so converging a role here
+    # would grant privileges nothing uses, and letting the script refuse it
+    # would kill the container over a value the app is perfectly happy to
+    # ignore. Both sides agree that blank is off.
+    case "${METAMCP_RUNTIME_DB_PASSWORD:-}" in
+        *[![:space:]]*) ;;
+        *) return 0 ;;
+    esac
+
+    if [ ! -x /app/scripts/ensure-runtime-role.sh ]; then
+        echo "❌ METAMCP_RUNTIME_DB_PASSWORD is set but /app/scripts/ensure-runtime-role.sh is missing! Exiting..."
+        exit 1
+    fi
+
+    if /app/scripts/ensure-runtime-role.sh; then
+        echo "✅ Runtime database role ready"
+    else
+        echo "❌ Failed to converge the runtime database role! Exiting..."
+        exit 1
+    fi
+}
+
+# Umbrella fork: white-label branding aliases.
+#
+# The frontend reads branding through next-runtime-env, which only republishes
+# NEXT_PUBLIC_-prefixed vars to the browser — and the sidebar brand is a client
+# component, so the canonical names must carry that prefix. Operators should
+# not have to care, so accept the short BRANDING_* names too and promote them
+# here. Doing it in the entrypoint (rather than in docker-compose.yml) means it
+# works for `docker run -e`, Kubernetes, and compose alike, and it happens
+# before either server process starts — so the server render and the client
+# hydration can never resolve different brands. Any NON-EMPTY NEXT_PUBLIC_
+# value wins; an explicitly-empty one is treated as unset and the alias still
+# promotes, matching resolveBrandText's empty-means-unset rule. Unset aliases
+# are a no-op.
+for _brand_key in PRODUCT_NAME ORG_NAME LOGO_PATH DESCRIPTION; do
+    _public_var="NEXT_PUBLIC_BRANDING_${_brand_key}"
+    _alias_var="BRANDING_${_brand_key}"
+    _public_val=$(eval "printf '%s' \"\${${_public_var}:-}\"")
+    _alias_val=$(eval "printf '%s' \"\${${_alias_var}:-}\"")
+    if [ -z "$_public_val" ] && [ -n "$_alias_val" ]; then
+        export "$_public_var=$_alias_val"
+        echo "Branding: promoted ${_alias_var} -> ${_public_var}"
+    fi
+done
+unset _brand_key _public_var _alias_var _public_val _alias_val
+
 # Set default values for postgres connection if not provided
 POSTGRES_HOST=${POSTGRES_HOST:-postgres}
 POSTGRES_PORT=${POSTGRES_PORT:-5432}
@@ -46,6 +110,9 @@ wait_for_postgres
 
 # Run migrations
 run_migrations
+
+# Converge the runtime role (no-op unless the split is configured)
+ensure_runtime_role
 
 # Start backend in the background
 echo "Starting backend server..."

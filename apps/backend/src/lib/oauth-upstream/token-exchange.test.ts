@@ -6,8 +6,10 @@ import {
   isUpstreamUnauthorizedError,
   redactToken,
   refreshAccessToken,
+  resolveIssuerStamp,
   resolveTokenEndpoint,
   resolveTokenEndpointAuthMethod,
+  stampIssuer,
   UpstreamTokenError,
 } from "./token-exchange";
 
@@ -482,5 +484,95 @@ describe("isUpstreamUnauthorizedError", () => {
         new Error('(HTTP 403): {"error":"invalid_client"}'),
       ),
     ).toBe(false);
+  });
+});
+
+// MCP SDK 1.31 `auth()` stamps `issuer` on stored credentials and the
+// frontend provider withholds unstamped refresh tokens and client
+// registrations, so tokens this server-side path persists must carry the
+// same stamp the SDK would have written.
+describe("resolveIssuerStamp", () => {
+  const serverUrl = "https://api.example.com/platform/mcp";
+
+  it("keeps the stamp already on the stored tokens", () => {
+    expect(
+      resolveIssuerStamp({
+        tokens: { issuer: "https://as.example.com/" },
+        clientInformation: {
+          client_id: "c",
+          issuer: "https://other.example.com/",
+        },
+        serverUrl,
+      }),
+    ).toBe("https://as.example.com/");
+  });
+
+  it("inherits the SDK's stamp on the client registration used for the grant", () => {
+    expect(
+      resolveIssuerStamp({
+        tokens: null,
+        clientInformation: {
+          client_id: "c",
+          issuer: "https://auth.example.org/tenant",
+        },
+        serverUrl,
+      }),
+    ).toBe("https://auth.example.org/tenant");
+  });
+
+  it("falls back to the SDK's legacy authorization server URL, the server origin root", () => {
+    // sdk/client/auth.js discoverOAuthServerInfo: String(new URL('/', serverUrl)).
+    expect(
+      resolveIssuerStamp({
+        tokens: null,
+        clientInformation: { client_id: "c" },
+        serverUrl,
+      }),
+    ).toBe("https://api.example.com/");
+  });
+
+  it("leaves the tokens unstamped when an unstamped client names its own token endpoint", () => {
+    // The authorization server behind a configured token endpoint is unknown,
+    // so binding the tokens to the server origin would be a guess.
+    expect(
+      resolveIssuerStamp({
+        tokens: null,
+        clientInformation: {
+          client_id: "c",
+          token_endpoint: "https://login.example.net/oauth2/token",
+        },
+        serverUrl,
+      }),
+    ).toBeUndefined();
+  });
+
+  it("ignores a stamp that is not a non-empty string", () => {
+    expect(
+      resolveIssuerStamp({
+        tokens: { issuer: 42 },
+        clientInformation: { client_id: "c", issuer: "" },
+        serverUrl,
+      }),
+    ).toBe("https://api.example.com/");
+  });
+});
+
+describe("stampIssuer", () => {
+  const tokens = { access_token: "AT", token_type: "Bearer" };
+
+  it("adds the stamp", () => {
+    expect(stampIssuer(tokens, "https://as.example.com/")).toEqual({
+      ...tokens,
+      issuer: "https://as.example.com/",
+    });
+  });
+
+  it("never persists an issuer the token response itself carried", () => {
+    // The SDK parses token responses without `issuer`; only the client sets it.
+    const fromUpstream = { ...tokens, issuer: "https://evil.example/" };
+    expect(stampIssuer(fromUpstream, "https://as.example.com/").issuer).toBe(
+      "https://as.example.com/",
+    );
+    expect(stampIssuer(fromUpstream, undefined)).not.toHaveProperty("issuer");
   });
 });

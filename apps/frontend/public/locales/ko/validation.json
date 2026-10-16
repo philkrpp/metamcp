@@ -32,6 +32,14 @@
   "apiKeyName": {
     "required": "API Key 이름을 입력하세요"
   },
+  "apiKeyScope": {
+    "required": "이 API Key의 범위 엔드포인트를 선택하거나 모든 엔드포인트를 선택하세요",
+    "exclusive": "단일 엔드포인트 또는 모든 엔드포인트 중 하나만 선택하세요"
+  },
+  "apiKeyActsAs": {
+    "requiresEndpoint": "ID가 바인딩된 키는 단일 엔드포인트로 범위를 지정해야 합니다 — 특정 엔드포인트를 선택하거나 실행 사용자를 제거하세요",
+    "ownerMismatch": "ID가 바인딩된 키는 실행 대상 사용자가 소유해야 합니다 — 공개 키나 다른 사용자 소유의 키에는 ID 바인딩을 설정할 수 없습니다"
+  },
   "description": {
     "tooLong": "설명이 너무 깁니다"
   },
@@ -47,5 +55,38 @@
     "required": "필수 입력 항목입니다",
     "tooShort": "너무 짧습니다",
     "tooLong": "너무 깁니다"
+  },
+  "apiKeyAdminPlane": {
+    "noScope": "관리 평면(컨트롤 플레인) 키에는 엔드포인트 범위가 없습니다, 엔드포인트 및 모든 엔드포인트 선택을 해제하세요",
+    "noActsAs": "관리 평면(컨트롤 플레인) 키는 대리 실행 ID를 가질 수 없습니다, 대리 실행 사용자를 제거하세요"
+  },
+  "oauthClientId": {
+    "required": "Client ID is required when any pre-registered OAuth field is set"
+  },
+  "oauthAuthorizationEndpoint": {
+    "invalid": "Authorization endpoint must be a valid URL"
+  },
+  "oauthTokenEndpoint": {
+    "invalid": "Token endpoint must be a valid URL"
+  },
+  "maxRateSeconds": {
+    "required": "Max rate seconds is required",
+    "tooSmall": "Max rate must be greater than 0",
+    "tooLarge": "Max rate must be less than 1000000"
+  },
+  "maxRate": {
+    "required": "Max rate is required",
+    "tooSmall": "Max rate must be greater than 0",
+    "tooLarge": "Max rate must be less than 1000000"
+  },
+  "clientMaxRateSeconds": {
+    "required": "Max rate seconds is required",
+    "tooSmall": "Max rate must be greater than 0",
+    "tooLarge": "Max rate must be less than 1000000"
+  },
+  "clientMaxRate": {
+    "required": "Max rate is required",
+    "tooSmall": "Max rate must be greater than 0",
+    "tooLarge": "Max rate must be less than 1000000"
   }
 }

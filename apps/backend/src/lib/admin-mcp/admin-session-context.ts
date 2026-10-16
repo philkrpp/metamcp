@@ -1,6 +1,7 @@
 export interface AdminToolsSessionContext {
   enabled: boolean;
   userId: string;
+  isAdmin: boolean;
 }
 
 const adminContextByInternalSessionId = new Map<

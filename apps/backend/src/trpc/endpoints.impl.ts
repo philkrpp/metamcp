@@ -1,3 +1,4 @@
+import type { AuditActor } from "@repo/trpc";
 import {
   CreateEndpointRequestSchema,
   CreateEndpointResponseSchema,
@@ -18,13 +19,26 @@ import {
   namespacesRepository,
 } from "../db/repositories";
 import { EndpointsSerializer } from "../db/serializers";
+import { emitAdminEvent } from "../lib/audit/admin-event";
 
 const apiKeysRepository = new ApiKeysRepository();
+
+// Conservative default per-credential tool-call budget applied when a new
+// endpoint enables rate limiting without specifying numbers. In the token-bucket
+// limiter (lib/rate-limit.ts) `max_rate` is the bucket CAPACITY (burst) and
+// `max_rate_seconds` is the REFILL rate in tokens per second, one token per
+// data-plane request, so this is a 600-request burst refilling at ~60/sec
+// (~3600/min) PER CREDENTIAL PER NAMESPACE. That is far above real
+// interactive/agent usage (single-digit requests/sec); it exists to bound a
+// runaway loop, not to shape normal traffic, and operators tune it per endpoint.
+const DEFAULT_ENDPOINT_MAX_RATE = 600;
+const DEFAULT_ENDPOINT_MAX_RATE_SECONDS = 60;
 
 export const endpointsImplementations = {
   create: async (
     input: z.infer<typeof CreateEndpointRequestSchema>,
     userId: string,
+    actor?: AuditActor,
   ): Promise<z.infer<typeof CreateEndpointResponseSchema>> => {
     try {
       // Check if endpoint name already exists (must be globally unique)
@@ -36,7 +50,13 @@ export const endpointsImplementations = {
         };
       }
 
-      // Determine user ownership based on input.user_id or default to current user
+      // Ownership defaults to PRIVATE (the creating admin) unless the caller
+      // opts in to public. `undefined` (the caller said nothing) resolves to
+      // the creator's id; an explicit `null` is the deliberate
+      // publish-to-everyone flag. A new endpoint reachable by every
+      // authenticated user the instant it is created is the open-by-default
+      // exposure this closes; making public an explicit choice means an
+      // operator has to ASK for it rather than get it by omission.
       const effectiveUserId =
         input.user_id !== undefined ? input.user_id : userId;
       const isPublicEndpoint = effectiveUserId === null;
@@ -68,6 +88,30 @@ export const endpointsImplementations = {
         };
       }
 
+      // Enforce the restricted => require_scoped_api_key pairing at the source.
+      // `restricted` gates OAuth callers only; `require_scoped_api_key` gates
+      // API-key callers. A restricted endpoint that still admits unscoped
+      // (gateway-wide) keys is confined on one plane and wide open on the
+      // other, so the two only actually restrict an endpoint when set together.
+      // We force the scoped-key requirement on rather than rejecting, so asking
+      // for restriction can never silently leave the API-key path open.
+      const restricted = input.restricted ?? false;
+      const requireScopedApiKey = restricted
+        ? true
+        : (input.requireScopedApiKey ?? false);
+
+      // A new endpoint gets a per-credential tool-call ceiling by default. When
+      // the flag is on but no budget was supplied, fall back to a conservative
+      // default so "enabled" always means an actually-enforcing limiter: the
+      // token bucket is inert at max_rate 0.
+      const enableMaxRate = input.enableMaxRate ?? true;
+      const maxRate = enableMaxRate
+        ? (input.maxRate ?? DEFAULT_ENDPOINT_MAX_RATE)
+        : input.maxRate;
+      const maxRateSeconds = enableMaxRate
+        ? (input.maxRateSeconds ?? DEFAULT_ENDPOINT_MAX_RATE_SECONDS)
+        : input.maxRateSeconds;
+
       logger.info(input);
 
       const result = await endpointsRepository.create({
@@ -75,19 +119,29 @@ export const endpointsImplementations = {
         description: input.description,
         namespace_uuid: input.namespaceUuid,
         enable_api_key_auth: input.enableApiKeyAuth ?? true,
-        enable_max_rate: input.enableMaxRate ?? false,
+        require_scoped_api_key: requireScopedApiKey,
+        restricted,
+        enable_max_rate: enableMaxRate,
         enable_client_max_rate: input.enableClientMaxRate ?? false,
-        max_rate: input.maxRate,
-        max_rate_seconds: input.maxRateSeconds,
+        max_rate: maxRate,
+        max_rate_seconds: maxRateSeconds,
         client_max_rate: input.clientMaxRate,
         client_max_rate_seconds: input.clientMaxRateSeconds,
         client_max_rate_strategy: input.clientMaxRateStrategy,
         client_max_rate_strategy_key: input.clientMaxRateStrategyKey,
-        enable_oauth: input.enableOauth ?? false,
+        enable_oauth: input.enableOauth ?? true,
         use_query_param_auth: input.useQueryParamAuth ?? false,
         enable_metamcp_admin_tools: input.enableMetamcpAdminTools ?? false,
         user_id: effectiveUserId,
       });
+
+      // Partial-success detail for the companion MCP server. The endpoint
+      // itself is already committed by the time this block runs, so a failure
+      // here must NOT be reported as a failed endpoint creation (the caller
+      // would retry into "Endpoint name already exists") — it is returned
+      // alongside the created endpoint instead, and the UI raises it as a
+      // warning rather than swallowing it under a success toast.
+      let mcpServerWarning: string | undefined;
 
       // Create MCP server if requested
       if (input.createMcpServer) {
@@ -98,55 +152,102 @@ export const endpointsImplementations = {
           const baseUrl = process.env.APP_URL;
           const endpointUrl = `${baseUrl}/metamcp/${input.name}/mcp`;
 
-          // Get or create API key for bearer token only if API key auth is enabled
+          // Get an API key for the bearer token only if API key auth is
+          // enabled. This ALWAYS mints a fresh key rather than reusing one of
+          // the user's existing keys, and that is forced rather than chosen:
+          // since migration 0034 the gateway stores only a hash, so no
+          // existing key's value can be read back to embed here. The mint is
+          // SCOPED to the endpoint being created — an internal convenience
+          // mint must not produce an unscoped (gateway-wide) key silently.
+          //
+          // The key's name carries the endpoint name because api_keys is
+          // UNIQUE on (user_id, name): a fixed literal would collide on the
+          // second endpoint the same user creates this way, and the collision
+          // would surface as an MCP server silently configured with an empty
+          // bearer token rather than as an error. Endpoint names are globally
+          // unique (checked at the top of this handler), so this is unique per
+          // user too, and the key is cascade-deleted with its endpoint, so
+          // recreating an endpoint under the same name does not collide with
+          // its own predecessor.
           let bearerToken = "";
           if (input.enableApiKeyAuth) {
             try {
-              const userApiKeys = await apiKeysRepository.findByUserId(userId);
-              const activeApiKey = userApiKeys.find((key) => key.is_active);
-
-              if (activeApiKey) {
-                bearerToken = activeApiKey.key;
-              } else {
-                // Create a new API key if none exists
-                const newApiKey = await apiKeysRepository.create({
-                  name: "Auto-generated for MCP Server",
-                  user_id: userId,
-                  is_active: true,
-                });
-                bearerToken = newApiKey.key;
-              }
+              const newApiKey = await apiKeysRepository.create({
+                name: `Auto-generated for MCP Server (${input.name})`,
+                user_id: userId,
+                endpoint_uuid: result.uuid,
+                is_active: true,
+              });
+              bearerToken = newApiKey.key;
             } catch (apiKeyError) {
               logger.error(
                 "Error getting API key for MCP server:",
                 apiKeyError,
               );
-              // Continue without bearer token if API key operation fails
+              // Do NOT fall through and create the server anyway. The endpoint
+              // gates on an API key, so a server row carrying an empty bearer
+              // token is a connection that 401s on its first call — a broken
+              // artifact the caller never asked for and was never told about.
+              // Since migration 0034 this is also the ONLY mint path here (the
+              // branch that reused an existing key is gone, because no stored
+              // key can be read back), so nothing else can supply the token.
+              mcpServerWarning = `The endpoint was created, but its companion MCP server was not: minting its API key failed (${apiKeyError instanceof Error ? apiKeyError.message : "unknown error"}). Create the MCP server manually, or retry with an API key you mint yourself.`;
             }
           }
 
-          await mcpServersRepository.create({
-            name: mcpServerName,
-            description: mcpServerDescription,
-            type: "STREAMABLE_HTTP",
-            url: endpointUrl,
-            bearerToken: bearerToken,
-            command: "",
-            args: [],
-            env: {},
-            user_id: effectiveUserId,
-          });
+          if (!mcpServerWarning) {
+            await mcpServersRepository.create({
+              name: mcpServerName,
+              description: mcpServerDescription,
+              type: "STREAMABLE_HTTP",
+              url: endpointUrl,
+              bearerToken: bearerToken,
+              command: "",
+              args: [],
+              env: {},
+              user_id: effectiveUserId,
+            });
+          }
         } catch (mcpError) {
           logger.error("Error creating MCP server:", mcpError);
-          // Don't fail the endpoint creation if MCP server creation fails
-          // Just log the error and continue
+          // The endpoint stands — the companion server is a convenience, and
+          // rolling back the primary resource because a convenience failed
+          // would be the worse trade. But the caller is told, because a
+          // silently absent MCP server is indistinguishable from one they
+          // simply cannot find.
+          mcpServerWarning = `The endpoint was created, but its companion MCP server was not: ${mcpError instanceof Error ? mcpError.message : "unknown error"}.`;
         }
       }
+
+      // An endpoint is a publicly reachable MCP surface, so its creation and
+      // its auth posture (API-key gate, scoped-key requirement, OAuth) are
+      // the breadcrumbs that answer "when did this URL start existing, and
+      // did it ever require a credential". Never the bearer token the block
+      // above may have embedded in the companion MCP server.
+      emitAdminEvent(actor, {
+        action: "endpoint.create",
+        target_type: "endpoint",
+        target_id: result.uuid,
+        detail: {
+          name: result.name,
+          namespace_uuid: input.namespaceUuid,
+          owner_user_id: effectiveUserId,
+          enable_api_key_auth: input.enableApiKeyAuth,
+          // The enforced values, not the raw input: restriction forces the
+          // scoped-key requirement on, and the audit row records what actually
+          // took effect so a later "was this ever open" query is answered by
+          // the truth, not by what the caller asked for.
+          require_scoped_api_key: requireScopedApiKey,
+          restricted,
+          enable_oauth: input.enableOauth,
+        },
+      });
 
       return {
         success: true as const,
         data: EndpointsSerializer.serializeEndpoint(result),
         message: "Endpoint created successfully",
+        ...(mcpServerWarning ? { warning: mcpServerWarning } : {}),
       };
     } catch (error) {
       logger.error("Error creating endpoint:", error);
@@ -173,6 +274,27 @@ export const endpointsImplementations = {
       };
     } catch (error) {
       logger.error("Error fetching endpoints:", error);
+      return {
+        success: false as const,
+        data: [],
+        message: "Failed to fetch endpoints",
+      };
+    }
+  },
+
+  // Every endpoint, whoever owns it. Only reachable through the admin-gated
+  // `listAll` procedure; `list` above keeps its public-plus-own filter.
+  listAll: async (): Promise<z.infer<typeof ListEndpointsResponseSchema>> => {
+    try {
+      const endpoints = await endpointsRepository.findAllWithNamespaces();
+
+      return {
+        success: true as const,
+        data: EndpointsSerializer.serializeEndpointWithNamespaceList(endpoints),
+        message: "Endpoints retrieved successfully",
+      };
+    } catch (error) {
+      logger.error("Error fetching all endpoints:", error);
       return {
         success: false as const,
         data: [],
@@ -227,6 +349,7 @@ export const endpointsImplementations = {
       uuid: string;
     },
     userId: string,
+    actor?: AuditActor,
   ): Promise<z.infer<typeof DeleteEndpointResponseSchema>> => {
     try {
       // First, check if the endpoint exists and user has permission to delete it
@@ -259,6 +382,13 @@ export const endpointsImplementations = {
         };
       }
 
+      emitAdminEvent(actor, {
+        action: "endpoint.delete",
+        target_type: "endpoint",
+        target_id: input.uuid,
+        detail: { name: deletedEndpoint.name },
+      });
+
       return {
         success: true as const,
         message: "Endpoint deleted successfully",
@@ -276,6 +406,7 @@ export const endpointsImplementations = {
   update: async (
     input: z.infer<typeof UpdateEndpointRequestSchema>,
     userId: string,
+    actor?: AuditActor,
   ): Promise<z.infer<typeof UpdateEndpointResponseSchema>> => {
     try {
       // First, check if the endpoint exists and user has permission to update it
@@ -339,12 +470,23 @@ export const endpointsImplementations = {
         };
       }
 
+      // A restricted endpoint must keep rejecting unscoped API keys, the same
+      // pairing enforced on create and at the restricted toggle. `restricted`
+      // is not editable through this form (it has its own tRPC procedure and
+      // audit event), so the endpoint's stored value is authoritative: an edit
+      // that tries to turn require_scoped_api_key off while the endpoint is
+      // restricted would re-open the API-key path the restriction exists to
+      // close, so it is forced back on here rather than obeyed.
+      const requireScopedApiKey =
+        existingEndpoint.restricted === true ? true : input.requireScopedApiKey;
+
       const result = await endpointsRepository.update({
         uuid: input.uuid,
         name: input.name,
         description: input.description,
         namespace_uuid: input.namespaceUuid,
         enable_api_key_auth: input.enableApiKeyAuth,
+        require_scoped_api_key: requireScopedApiKey,
         enable_max_rate: input.enableMaxRate ?? false,
         enable_client_max_rate: input.enableClientMaxRate ?? false,
         max_rate: input.maxRate,
@@ -356,6 +498,25 @@ export const endpointsImplementations = {
         enable_oauth: input.enableOauth,
         use_query_param_auth: input.useQueryParamAuth,
         enable_metamcp_admin_tools: input.enableMetamcpAdminTools,
+      });
+
+      // The auth-posture fields are carried for the same reason as on create:
+      // turning `enable_api_key_auth` off on a live endpoint opens it to the
+      // internet, and that has to be attributable to a person and a moment.
+      emitAdminEvent(actor, {
+        action: "endpoint.update",
+        target_type: "endpoint",
+        target_id: result.uuid,
+        detail: {
+          name: result.name,
+          namespace_uuid: input.namespaceUuid,
+          enable_api_key_auth: input.enableApiKeyAuth,
+          // The enforced value, not the raw input: an attempt to unset this on
+          // a restricted endpoint is coerced back on above, and the audit row
+          // records what actually took effect.
+          require_scoped_api_key: requireScopedApiKey,
+          enable_oauth: input.enableOauth,
+        },
       });
 
       return {

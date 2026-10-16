@@ -1,11 +1,140 @@
 import logger from "@/utils/logger";
 
 import { configService } from "./config.service";
+import { identityMatches, type SessionIdentity } from "./metamcp/session-auth";
+
+/**
+ * The endpoint half of a session's binding: which namespace + public endpoint
+ * a session-id-keyed transport lookup must be targeting. Without this, the
+ * in-memory session map is keyed by `Mcp-Session-Id` ALONE — a caller
+ * authenticated for endpoint A could drive endpoint B's pooled namespace by
+ * presenting B's session id. Mirrors the cross-namespace replay predicate the
+ * DB-backed `recoverPersistedSession` already enforces (namespace_uuid +
+ * endpoint_name must both match).
+ *
+ * Split out from `SessionBinding` below so the DB-backed guards can keep
+ * comparing a persisted `mcp_sessions` row — which carries the endpoint pair
+ * but not the in-memory identity — through the same predicate.
+ */
+export interface EndpointBinding {
+  namespaceUuid: string;
+  endpointName: string;
+}
+
+/**
+ * What is stored alongside a live public-endpoint session: its endpoint AND
+ * the identity of the credential that created it.
+ *
+ * The endpoint half alone was not enough. Every endpoint that accepts more
+ * than one credential — a gateway-wide api key plus a scoped one, two keys for
+ * two consumers, any OAuth user with access — had a pool in which ANY of those
+ * credentials could present ANY live session id for that endpoint and be
+ * handed the transport, because the lookup never re-checked WHO created it.
+ * The DB-backed recovery path had guarded exactly this since it shipped
+ * (`auth_principal` + `auth_method`); the in-memory fast path, which serves
+ * every request after the first, had not. See `resolveBoundSession` in
+ * `streamable-http.ts` and the message-leg guard in `sse.ts`.
+ */
+export interface SessionBinding extends EndpointBinding {
+  identity: SessionIdentity;
+}
+
+/**
+ * True only when a stored binding matches the endpoint a request is
+ * targeting — BOTH the namespace uuid and the endpoint name must agree. A
+ * missing binding (`undefined`) never matches, so a session with no recorded
+ * binding is treated as non-existent for the requesting endpoint rather than
+ * blindly served.
+ *
+ * This is the ENDPOINT-ONLY predicate, used where the thing being compared is
+ * a persisted `mcp_sessions` row: `recoverPersistedSession` and the
+ * not-resident branch of `resolveDeletableSession`, both of which verify the
+ * credential separately against the row's `auth_principal` hash. In-memory
+ * lookups use `boundSessionMatches` below instead.
+ */
+export function bindingMatches(
+  binding: EndpointBinding | undefined,
+  target: EndpointBinding,
+): boolean {
+  return (
+    binding !== undefined &&
+    binding.namespaceUuid === target.namespaceUuid &&
+    binding.endpointName === target.endpointName
+  );
+}
+
+/**
+ * The predicate every IN-MEMORY session lookup funnels through: the request
+ * must target the session's endpoint AND present the identity the session was
+ * created under. One function so the check cannot drift between the three
+ * legs that need it (streamable-http's request lookup and DELETE guard, sse's
+ * message leg), which is the same reason `bindingMatches` was extracted.
+ *
+ * Callers treat `false` as "no such session" rather than as a distinct
+ * refusal: per the MCP Streamable HTTP session model an unknown session id is
+ * answered 404 so a well-behaved client re-initializes, and collapsing the
+ * foreign-credential case into that one answer is also what stops the response
+ * from confirming that someone else's session id is live.
+ */
+export function boundSessionMatches(
+  binding: SessionBinding | undefined,
+  target: SessionBinding,
+): boolean {
+  return (
+    bindingMatches(binding, target) &&
+    identityMatches(binding?.identity, target.identity)
+  );
+}
+
+/**
+ * Which half of the binding a refused lookup actually failed.
+ *
+ * The response never learns this — every refusal answers the same 404 — but
+ * the audit row does, and `detail.reason` is the field an operator queries to
+ * separate the classes. One hardcoded reason would report a credential
+ * mismatch for a plain cross-endpoint replay, i.e. record an event that did
+ * not happen, in a table migration 0028 makes append-only.
+ *
+ * Lives here, next to the predicate whose `false` it explains, so the two
+ * cannot drift: the ordering below mirrors `boundSessionMatches` exactly.
+ * PRECONDITION: only meaningful when `boundSessionMatches` already returned
+ * false for the same pair.
+ */
+export type SessionBindingDenialReason =
+  | "session_binding_absent"
+  | "session_endpoint_mismatch"
+  | "session_credential_mismatch";
+
+export function classifyBindingDenial(
+  binding: SessionBinding | undefined,
+  target: SessionBinding,
+): SessionBindingDenialReason {
+  // A resident session carrying no binding at all. Unreachable today — every
+  // `addSession` call site passes one — which is why it gets its own reason
+  // rather than being folded into the endpoint case it would otherwise
+  // misreport as.
+  if (binding === undefined) return "session_binding_absent";
+  if (!bindingMatches(binding, target)) return "session_endpoint_mismatch";
+  return "session_credential_mismatch";
+}
+
+/**
+ * One live session of a credential, as far as an operator-facing summary needs:
+ * its id (so an activity probe can look it up; it is NEVER written into a log
+ * line) and the endpoint it is bound to.
+ */
+export interface SessionListing {
+  sessionId: string;
+  endpointName: string;
+}
 
 export interface SessionLifetimeManager<T> {
-  addSession(sessionId: string, session: T): void;
+  addSession(sessionId: string, session: T, binding?: SessionBinding): void;
   removeSession(sessionId: string): void;
   getSession(sessionId: string): T | undefined;
+  getSessionBinding(sessionId: string): SessionBinding | undefined;
+  countSessionsForIdentity(identity: SessionIdentity): number;
+  listSessionsForIdentity(identity: SessionIdentity): SessionListing[];
   getAllSessions(): Map<string, T>;
   getSessionAge(sessionId: string): number | undefined;
   isSessionExpired(sessionId: string): Promise<boolean>;
@@ -19,11 +148,12 @@ export interface SessionLifetimeManager<T> {
   stopCleanupTimer(): void;
 }
 
-export class SessionLifetimeManagerImpl<
-  T,
-> implements SessionLifetimeManager<T> {
+export class SessionLifetimeManagerImpl<T>
+  implements SessionLifetimeManager<T>
+{
   private sessions: Map<string, T> = new Map();
   private sessionTimestamps: Map<string, number> = new Map();
+  private sessionBindings: Map<string, SessionBinding> = new Map();
   private cleanupTimer: NodeJS.Timeout | null = null;
   private readonly name: string;
 
@@ -31,18 +161,60 @@ export class SessionLifetimeManagerImpl<
     this.name = name;
   }
 
-  addSession(sessionId: string, session: T): void {
+  addSession(sessionId: string, session: T, binding?: SessionBinding): void {
     this.sessions.set(sessionId, session);
     this.sessionTimestamps.set(sessionId, Date.now());
+    if (binding) {
+      this.sessionBindings.set(sessionId, binding);
+    }
   }
 
   removeSession(sessionId: string): void {
     this.sessions.delete(sessionId);
     this.sessionTimestamps.delete(sessionId);
+    this.sessionBindings.delete(sessionId);
   }
 
   getSession(sessionId: string): T | undefined {
     return this.sessions.get(sessionId);
+  }
+
+  // The endpoint AND creating credential this session was recorded against.
+  // Used by the public-endpoint routers to reject a session id presented on
+  // an endpoint other than the one it belongs to, or under a credential other
+  // than the one that opened it.
+  getSessionBinding(sessionId: string): SessionBinding | undefined {
+    return this.sessionBindings.get(sessionId);
+  }
+
+  // How many live sessions this manager holds for a given credential identity.
+  // Derived from the binding map on demand rather than from a maintained
+  // counter: a binding is deleted on removeSession, so the count is
+  // self-healing and a missed decrement in one of the cleanup paths cannot leak
+  // it upward and lock a credential out. Feeds the per-credential
+  // concurrent-session ceiling (see lib/metamcp/credential-session-quota).
+  countSessionsForIdentity(identity: SessionIdentity): number {
+    let count = 0;
+    for (const binding of this.sessionBindings.values()) {
+      if (identityMatches(binding.identity, identity)) count += 1;
+    }
+    return count;
+  }
+
+  // The live sessions this manager holds for a credential identity, with the
+  // endpoint each is bound to. Derived from the binding map exactly as
+  // `countSessionsForIdentity` is, so the two always agree and nothing is
+  // maintained separately. Only called on the rare path where a credential is
+  // approaching or at its session ceiling, to say WHAT is filling it; the hot
+  // path never calls this.
+  listSessionsForIdentity(identity: SessionIdentity): SessionListing[] {
+    const listing: SessionListing[] = [];
+    for (const [sessionId, binding] of this.sessionBindings.entries()) {
+      if (identityMatches(binding.identity, identity)) {
+        listing.push({ sessionId, endpointName: binding.endpointName });
+      }
+    }
+    return listing;
   }
 
   getAllSessions(): Map<string, T> {
@@ -91,8 +263,15 @@ export class SessionLifetimeManagerImpl<
 
       // Clean up expired sessions
       if (expiredSessions.length > 0) {
+        // Count at info, ids at debug only: a live session-id list in a
+        // request-path log undoes the fork's session-id log hygiene. Dormant
+        // in prod (sessionLifetime is null there), but this timer fires the
+        // moment an operator sets a finite lifetime.
         logger.info(
-          `Cleaning up ${expiredSessions.length} expired ${this.name} sessions: ${expiredSessions.map((s) => s.sessionId).join(", ")}`,
+          `Cleaning up ${expiredSessions.length} expired ${this.name} sessions`,
+        );
+        logger.debug(
+          `Expired ${this.name} session ids: ${expiredSessions.map((s) => s.sessionId).join(", ")}`,
         );
 
         await Promise.allSettled(

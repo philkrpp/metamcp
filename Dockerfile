@@ -1,8 +1,16 @@
 # syntax=docker/dockerfile:1
-# Use the official uv image as base
-FROM ghcr.io/astral-sh/uv:debian AS base
+# Base image: the official uv image, digest-pinned so the build is
+# reproducible and the base layer cannot shift under us between builds. The
+# :debian tag is kept for human context; the @sha256 index digest is what
+# Docker resolves. Bumped by Dependabot's docker ecosystem (see
+# .github/dependabot.yml), which opens a reviewable PR when the tag moves.
+FROM ghcr.io/astral-sh/uv:debian@sha256:b2b767dc8bbe5b9f813ca4958a43cc8421ca8eab6c954c74e5b1e641fea7a6ad AS base
 
-# Install Node.js and pnpm directly
+# Install Node.js and pnpm directly. nodejs is pinned to an exact nodesource
+# version so the image ships a known Node build instead of "whatever 24.x is
+# current at build time"; bump it by hand when moving Node (Dependabot's
+# docker ecosystem tracks the base image digest, not apt package versions
+# inside RUN layers). pnpm is already version-pinned.
 RUN apt-get update && apt-get install -y \
     curl \
     gnupg \
@@ -52,10 +60,17 @@ COPY . .
 RUN --mount=type=cache,target=/turbo \
     TURBO_CACHE_DIR=/turbo pnpm build
 
-# Increase the Next.js dev/prod proxy timeout from 30s to 600s.
-# Resolve the next package dir via glob so this survives lockfile/peer-hash changes.
-RUN find node_modules/.pnpm -path "*/next/dist/*/router-utils/proxy-request.js" \
-    -exec sed -i -e "s/30000/600000/" {} +
+# Raise Next's proxy-request timeout 30s -> 600s (long-running MCP tool
+# calls stream through the frontend's rewrite proxy). The pnpm store path
+# encodes next's exact version + peer suffix, so it MUST be globbed — the
+# hardcoded 15.5.12 path silently outlived a next bump and broke three
+# consecutive image builds (2026-07-11). Fails the build loudly if the
+# expected pair of files stops matching.
+RUN set -e; \
+    files=$(find node_modules/.pnpm -name proxy-request.js -path '*/next/dist/*' | sort); \
+    count=$(printf '%s\n' "$files" | grep -c . || true); \
+    if [ "$count" -lt 2 ]; then echo "ERROR: expected >=2 next proxy-request.js files (dist + dist/esm), found $count" >&2; exit 1; fi; \
+    printf '%s\n' "$files" | while read -r f; do sed -i -e "s/30000/600000/" "$f"; done
 
 # Production runner stage
 FROM base AS runner
@@ -79,6 +94,12 @@ RUN adduser --system --uid 1001 --home /home/nextjs nextjs && \
 
 # Copy built applications
 COPY --from=builder --chown=nextjs:nodejs /app/apps/frontend/.next ./apps/frontend/.next
+# Umbrella fork: Next.js standalone mode does NOT auto-copy public/ into
+# the runtime layer, so static assets in apps/frontend/public/ (including
+# Umbrella branding PNGs) 404 unless we copy them here. Upstream gets
+# away with this because they don't put anything in public/ that the
+# runtime serves — favicon.ico lives in app/ as a Next 15 special file.
+COPY --from=builder --chown=nextjs:nodejs /app/apps/frontend/public ./apps/frontend/public
 COPY --from=builder --chown=nextjs:nodejs /app/apps/frontend/package.json ./apps/frontend/
 COPY --from=builder --chown=nextjs:nodejs /app/apps/backend/dist ./apps/backend/dist
 COPY --from=builder --chown=nextjs:nodejs /app/apps/backend/package.json ./apps/backend/
@@ -90,16 +111,36 @@ COPY --from=builder --chown=nextjs:nodejs /app/packages ./packages
 COPY --from=builder --chown=nextjs:nodejs /app/node_modules ./node_modules
 COPY --from=builder --chown=nextjs:nodejs /app/package.json ./
 COPY --from=builder --chown=nextjs:nodejs /app/pnpm-workspace.yaml ./
+# Lockfile is required here so the prod install below can run --frozen-lockfile:
+# pin prod deps to the already-resolved graph instead of re-resolving
+# package.json ranges (which can silently drift from the committed lockfile).
+COPY --from=builder --chown=nextjs:nodejs /app/pnpm-lock.yaml ./
 
-# Install production dependencies only (drizzle-kit is a prod dep, used for migrations)
-# CI=true so pnpm purges node_modules non-interactively (no TTY in Docker build)
-# Shared pnpm store cache mount so packages aren't re-downloaded on every build.
+# Install production dependencies only. drizzle-kit is a prod dependency of
+# apps/backend (the entrypoint runs `drizzle-kit migrate` at start), so the
+# frozen install provides it from the lockfile-resolved graph. It used to be
+# fetched here with an ad-hoc `pnpm add` outside the lockfile, which pulled an
+# unpinned, ungoverned dependency tree into the production image on every build.
+#
+# CI=1 so pnpm runs non-interactively: the copied node_modules was built with
+# dev dependencies, so switching to --prod makes pnpm purge and reinstall the
+# modules tree, and without CI that confirmation prompt stalls in the non-TTY
+# build and leaves the per-workspace node_modules (and drizzle-kit's bin)
+# unlinked. The old ad-hoc `pnpm add` masked this by triggering its own full
+# reconcile; with that gone, the prod install has to complete on its own.
+# Shared pnpm store cache mount so packages are not re-downloaded on every build.
 RUN --mount=type=cache,target=/pnpm/store \
-    CI=true pnpm install --prod --config.confirmModulesPurge=false --store-dir=/pnpm/store
+    CI=1 pnpm install --prod --frozen-lockfile --config.confirmModulesPurge=false --store-dir=/pnpm/store
 
 # Copy startup script
 COPY --chown=nextjs:nodejs docker-entrypoint.sh ./
 RUN chmod +x docker-entrypoint.sh
+
+# Helper scripts the entrypoint shells out to. Separate files rather than more
+# functions inside docker-entrypoint.sh so the same artifact the image runs is
+# the one the test suite executes against a real Postgres.
+COPY --chown=nextjs:nodejs scripts ./scripts
+RUN chmod +x scripts/*.sh
 
 USER nextjs
 

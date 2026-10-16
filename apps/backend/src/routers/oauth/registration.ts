@@ -1,13 +1,19 @@
 import express from "express";
 
+import {
+  auditRequestContext,
+  clampAuditText,
+  clampAuditTextList,
+  emit,
+} from "@/lib/audit/audit-emitter";
 import logger from "@/utils/logger";
 
 import { oauthRepository } from "../../db/repositories";
+import { buildClientRegistration } from "./client-registration";
 import {
-  generateSecureClientId,
-  generateSecureClientSecret,
-  rateLimitToken,
-  validateRedirectUri,
+  getBaseUrl,
+  GRANTED_OAUTH_SCOPE,
+  rateLimitRegistration,
 } from "./utils";
 
 const registrationRouter = express.Router();
@@ -17,191 +23,180 @@ const registrationRouter = express.Router();
  * Allows clients to dynamically register with the authorization server
  * Implementation follows RFC 7591 with OAuth 2.1 security enhancements
  */
-registrationRouter.post("/oauth/register", rateLimitToken, async (req, res) => {
-  try {
-    // Check if body was parsed correctly
-    if (!req.body || typeof req.body !== "object") {
-      return res.status(400).json({
-        error: "invalid_request",
-        error_description: "Request body is missing or malformed",
-      });
-    }
-
-    const {
-      redirect_uris,
-      response_types,
-      grant_types,
-      client_name,
-      client_uri,
-      logo_uri,
-      scope,
-      contacts,
-      tos_uri,
-      policy_uri,
-      token_endpoint_auth_method,
-      software_id,
-      software_version,
-    } = req.body;
-
-    // Validate required parameters
-    if (
-      !redirect_uris ||
-      !Array.isArray(redirect_uris) ||
-      redirect_uris.length === 0
-    ) {
-      return res.status(400).json({
-        error: "invalid_redirect_uri",
-        error_description:
-          "redirect_uris is required and must be a non-empty array",
-      });
-    }
-
-    // OAuth 2.1 Security: Validate redirect URIs
-    for (const uri of redirect_uris) {
-      if (!validateRedirectUri(uri)) {
-        return res.status(400).json({
-          error: "invalid_redirect_uri",
-          error_description: `Invalid redirect URI: ${uri}. Must use secure scheme and valid format.`,
-        });
-      }
-    }
-
-    // OAuth 2.1 Security: Set secure defaults for optional parameters
-    const clientGrantTypes =
-      grant_types && Array.isArray(grant_types)
-        ? grant_types
-        : ["authorization_code"]; // Only authorization_code by default
-
-    const clientResponseTypes =
-      response_types && Array.isArray(response_types)
-        ? response_types
-        : ["code"];
-
-    // OAuth 2.1 Security: Default to PKCE (none auth method)
-    const clientTokenEndpointAuthMethod = token_endpoint_auth_method || "none";
-
-    // Validate grant types and response types consistency
-    const validGrantTypes = [
-      "authorization_code",
-      "refresh_token",
-      "client_credentials",
-    ];
-    const validResponseTypes = ["code"];
-    const validAuthMethods = [
-      "none",
-      "client_secret_post",
-      "client_secret_basic",
-    ];
-
-    for (const grantType of clientGrantTypes) {
-      if (!validGrantTypes.includes(grantType)) {
+// `rateLimitRegistration`, NOT the token endpoint's limiter this route used to
+// share: one bucket meant anonymous registration traffic could spend the budget
+// a paired connector's token exchange needed. See rateLimitRegistration.
+registrationRouter.post(
+  "/oauth/register",
+  rateLimitRegistration,
+  async (req, res) => {
+    try {
+      // Check if body was parsed correctly
+      if (!req.body || typeof req.body !== "object") {
         return res.status(400).json({
           error: "invalid_request",
-          error_description: `Unsupported grant type: ${grantType}`,
+          error_description: "Request body is missing or malformed",
         });
       }
-    }
 
-    for (const responseType of clientResponseTypes) {
-      if (!validResponseTypes.includes(responseType)) {
+      // Validate + mint through the shared registration core, so this public
+      // DCR endpoint and the admin UI's tRPC create path apply one identical
+      // rule set (see ./client-registration.ts). The error pair it returns is
+      // already the RFC 7591 shape this endpoint has always emitted.
+      const registration = buildClientRegistration(req.body);
+
+      if (!registration.ok) {
         return res.status(400).json({
-          error: "invalid_request",
-          error_description: `Unsupported response type: ${responseType}`,
+          error: registration.error,
+          error_description: registration.error_description,
         });
       }
-    }
 
-    if (!validAuthMethods.includes(clientTokenEndpointAuthMethod)) {
-      return res.status(400).json({
-        error: "invalid_request",
-        error_description: `Unsupported token endpoint auth method: ${clientTokenEndpointAuthMethod}`,
+      // `registration_source: "dcr"` is stamped HERE rather than inside the
+      // shared core, because this is the door — the core serves both. It is
+      // what makes a row from this anonymous endpoint eligible for the
+      // retention sweep, and what keeps the admin dialog's rows out of it. See
+      // ./client-retention.ts.
+      const clientRegistration = {
+        ...registration.client,
+        registration_source: "dcr" as const,
+      };
+      const clientSecret = clientRegistration.client_secret;
+
+      // Store the client registration
+      await oauthRepository.upsertClient(clientRegistration);
+
+      // The highest-signal anonymous write this gateway accepts, and until now
+      // it was invisible. RFC 7591 dynamic registration needs no credential, so
+      // anyone who can reach /oauth/register can add a client that a signed-in
+      // human may then be asked to approve — and `client_name` is whatever that
+      // caller typed, which is how a consent screen ends up saying "Claude".
+      // Emitted AFTER upsertClient, so a row here means a client that exists.
+      //
+      // actor_type is `anonymous`, honestly: there is no session, no key and no
+      // prior client identity on this request. The IP is the only attribution
+      // available, which is precisely why the CF-Connecting-IP middleware had
+      // to land before this lane. `client_secret` is never recorded — it is
+      // returned to the caller once, in the response below, and nowhere else.
+      const audit = auditRequestContext(req);
+      emit({
+        actor_type: "anonymous",
+        actor_id: null,
+        actor_label: null,
+        actor_ip: audit.actor_ip,
+        actor_user_agent: audit.actor_user_agent,
+        action: "oauth.dcr.register",
+        target_type: "oauth_client",
+        target_id: clientRegistration.client_id,
+        outcome: "success",
+        request_id: audit.request_id,
+        http_status: 201,
+        // EVERY caller-supplied field here is clamped, and on this endpoint
+        // that is a hard requirement rather than tidiness: `/oauth/register`
+        // takes no credential, and the target is a jsonb column in a table
+        // with DELETE/TRUNCATE triggers, so every byte written is permanent.
+        //
+        // Three controls now stand in front of this clamp, and it is kept
+        // anyway. The body limit is 256kb rather than the app-wide 50mb
+        // (OAUTH_BODY_LIMIT), `buildClientRegistration` caps the redirect
+        // array and every element and metadata field it stores, and the
+        // registration rate limit is its own bucket keyed on the real caller
+        // IP instead of one process-global `req.ip` budget. What survives all
+        // three is a payload that is legal but still worth writing compactly
+        // a thousand times over — and a clamp that only exists at the caller
+        // is a clamp the next call site does not get.
+        // `redirect_uri_count` preserves the fact that truncation happened.
+        detail: {
+          client_name: clientRegistration.client_name
+            ? clampAuditText(clientRegistration.client_name, 100)
+            : null,
+          redirect_uris: clampAuditTextList(
+            clientRegistration.redirect_uris,
+            10,
+            512,
+          ),
+          redirect_uri_count: Array.isArray(clientRegistration.redirect_uris)
+            ? clientRegistration.redirect_uris.length
+            : 0,
+          grant_types: clampAuditTextList(
+            clientRegistration.grant_types,
+            10,
+            64,
+          ),
+          token_endpoint_auth_method: clampAuditText(
+            clientRegistration.token_endpoint_auth_method,
+            64,
+          ),
+          has_client_secret: Boolean(clientSecret),
+        },
+      });
+
+      // Prepare response according to RFC 7591 with OAuth 2.1 guidance.
+      // getBaseUrl, not `req.get("host")`: every request reaches this router
+      // through the Next.js proxy, so the Host header is the container-internal
+      // `localhost:12009`. Building the advertised endpoints from it both leaked
+      // the internal listener to an anonymous caller and handed registering
+      // clients token/authorize URLs they cannot reach. getBaseUrl prefers
+      // APP_URL, then X-Forwarded-Host.
+      const baseUrl = getBaseUrl(req);
+      const response: Record<string, unknown> = {
+        client_id: clientRegistration.client_id,
+        client_name: clientRegistration.client_name,
+        redirect_uris: clientRegistration.redirect_uris,
+        grant_types: clientRegistration.grant_types,
+        response_types: clientRegistration.response_types,
+        token_endpoint_auth_method:
+          clientRegistration.token_endpoint_auth_method,
+        scope: clientRegistration.scope,
+
+        // OAuth 2.1 Security Information
+        oauth_compliance: "OAuth 2.1",
+        pkce_required: true,
+        pkce_methods_supported: ["S256"],
+
+        // Endpoint information for the client
+        authorization_endpoint: `${baseUrl}/oauth/authorize`,
+        token_endpoint: `${baseUrl}/oauth/token`,
+        userinfo_endpoint: `${baseUrl}/oauth/userinfo`,
+        revocation_endpoint: `${baseUrl}/oauth/revoke`,
+      };
+
+      // Include client_secret only if one was generated
+      if (clientSecret) {
+        response.client_secret = clientSecret;
+        response.security_note =
+          "Store client_secret securely. For public clients, use PKCE instead.";
+      } else {
+        response.security_note =
+          "This client uses PKCE for security. Ensure code_challenge and code_challenge_method are included in authorization requests.";
+      }
+
+      // Include optional metadata if provided
+      if (clientRegistration.client_uri)
+        response.client_uri = clientRegistration.client_uri;
+      if (clientRegistration.logo_uri)
+        response.logo_uri = clientRegistration.logo_uri;
+      if (clientRegistration.contacts)
+        response.contacts = clientRegistration.contacts;
+      if (clientRegistration.tos_uri)
+        response.tos_uri = clientRegistration.tos_uri;
+      if (clientRegistration.policy_uri)
+        response.policy_uri = clientRegistration.policy_uri;
+      if (clientRegistration.software_id)
+        response.software_id = clientRegistration.software_id;
+      if (clientRegistration.software_version)
+        response.software_version = clientRegistration.software_version;
+
+      res.status(201).json(response);
+    } catch (error) {
+      logger.error("Error in OAuth registration endpoint:", error);
+      res.status(500).json({
+        error: "server_error",
+        error_description: "Internal server error during client registration",
       });
     }
-
-    // Generate client credentials
-    const clientId = generateSecureClientId();
-
-    // OAuth 2.1 Security: Generate client secret only if auth method requires it
-    // Recommend PKCE (none) for public clients per OAuth 2.1
-    let clientSecret: string | null = null;
-    if (clientTokenEndpointAuthMethod !== "none") {
-      clientSecret = generateSecureClientSecret();
-    }
-
-    // Create client registration
-    const clientRegistration = {
-      client_id: clientId,
-      client_secret: clientSecret,
-      client_name: client_name || "Unnamed MCP Client",
-      redirect_uris: redirect_uris,
-      grant_types: clientGrantTypes,
-      response_types: clientResponseTypes,
-      token_endpoint_auth_method: clientTokenEndpointAuthMethod,
-      scope: scope || "admin",
-      client_uri: client_uri || null,
-      logo_uri: logo_uri || null,
-      contacts: contacts && Array.isArray(contacts) ? contacts : null,
-      tos_uri: tos_uri || null,
-      policy_uri: policy_uri || null,
-      software_id: software_id || null,
-      software_version: software_version || null,
-      created_at: new Date(),
-    };
-
-    // Store the client registration
-    await oauthRepository.upsertClient(clientRegistration);
-
-    // Prepare response according to RFC 7591 with OAuth 2.1 guidance
-    const baseUrl = req.protocol + "://" + req.get("host");
-    const response: Record<string, unknown> = {
-      client_id: clientId,
-      client_name: clientRegistration.client_name,
-      redirect_uris: clientRegistration.redirect_uris,
-      grant_types: clientRegistration.grant_types,
-      response_types: clientRegistration.response_types,
-      token_endpoint_auth_method: clientRegistration.token_endpoint_auth_method,
-      scope: clientRegistration.scope,
-
-      // OAuth 2.1 Security Information
-      oauth_compliance: "OAuth 2.1",
-      pkce_required: true,
-      pkce_methods_supported: ["S256"],
-
-      // Endpoint information for the client
-      authorization_endpoint: `${baseUrl}/oauth/authorize`,
-      token_endpoint: `${baseUrl}/oauth/token`,
-      userinfo_endpoint: `${baseUrl}/oauth/userinfo`,
-      revocation_endpoint: `${baseUrl}/oauth/revoke`,
-    };
-
-    // Include client_secret only if one was generated
-    if (clientSecret) {
-      response.client_secret = clientSecret;
-      response.security_note =
-        "Store client_secret securely. For public clients, use PKCE instead.";
-    } else {
-      response.security_note =
-        "This client uses PKCE for security. Ensure code_challenge and code_challenge_method are included in authorization requests.";
-    }
-
-    // Include optional metadata if provided
-    if (client_uri) response.client_uri = client_uri;
-    if (logo_uri) response.logo_uri = logo_uri;
-    if (contacts) response.contacts = contacts;
-    if (tos_uri) response.tos_uri = tos_uri;
-    if (policy_uri) response.policy_uri = policy_uri;
-    if (software_id) response.software_id = software_id;
-    if (software_version) response.software_version = software_version;
-
-    res.status(201).json(response);
-  } catch (error) {
-    logger.error("Error in OAuth registration endpoint:", error);
-    res.status(500).json({
-      error: "server_error",
-      error_description: "Internal server error during client registration",
-    });
-  }
-});
+  },
+);
 
 /**
  * OAuth 2.0 Dynamic Client Registration Information Endpoint
@@ -209,7 +204,8 @@ registrationRouter.post("/oauth/register", rateLimitToken, async (req, res) => {
  */
 registrationRouter.get("/oauth/register", async (req, res) => {
   try {
-    const baseUrl = req.protocol + "://" + req.get("host");
+    // Same proxy caveat as the POST handler above — see the comment there.
+    const baseUrl = getBaseUrl(req);
 
     res.json({
       registration_endpoint: `${baseUrl}/oauth/register`,
@@ -227,7 +223,10 @@ registrationRouter.get("/oauth/register", async (req, res) => {
         response_types: "OAuth response types (default: ['code'])",
         token_endpoint_auth_method:
           "Client authentication method (default: 'none' for PKCE)",
-        scope: "Requested scope (default: 'admin')",
+        // Kept listed because RFC 7591 allows clients to send it, but say
+        // plainly that it is ignored — this doc previously told callers to
+        // ask for 'admin', which the server now never grants.
+        scope: `Ignored. This server always grants '${GRANTED_OAUTH_SCOPE}'.`,
         client_uri: "Homepage URL for your application",
         logo_uri: "Logo URL for your application",
         contacts: "Array of contact email addresses",
@@ -255,7 +254,6 @@ registrationRouter.get("/oauth/register", async (req, res) => {
           grant_types: ["authorization_code"],
           response_types: ["code"],
           token_endpoint_auth_method: "none",
-          scope: "admin",
         },
       },
 

@@ -11,9 +11,10 @@ interface LogsState {
   totalCount: number;
   lastFetch: Date | null;
 
-  // Actions
+  // Actions. Read-only: `clearLogs` was removed with migration 0028's
+  // audit_log — the backend procedure it called no longer exists. See
+  // packages/trpc/src/routers/frontend/logs.ts.
   fetchLogs: () => Promise<void>;
-  clearLogs: () => Promise<void>;
   startAutoRefresh: () => void;
   stopAutoRefresh: () => void;
   setAutoRefresh: (enabled: boolean) => void;
@@ -48,7 +49,7 @@ export const useLogsStore = create<LogsState>()(
         set({ isLoading: true });
 
         const response = await vanillaTrpcClient.frontend.logs.get.query({
-          limit: 500,
+          limit: 1000,
         });
 
         if (response.success) {
@@ -67,44 +68,25 @@ export const useLogsStore = create<LogsState>()(
         console.error("Failed to fetch logs:", error);
         set({ isLoading: false });
 
-        // Check if it's an authentication error
+        // Check if it's an auth error the user can't recover from by staying on
+        // the page. UNAUTHORIZED = not logged in. FORBIDDEN = logged in but not
+        // an admin: logs.get is adminProcedure, and this store's fetch fires on
+        // every page for every user (see the module init below), so without the
+        // FORBIDDEN case a member browser would run a permanent 2s 403 poll loop.
         if (error && typeof error === "object" && "message" in error) {
           const errorMessage = String(error.message);
           if (
             errorMessage.includes("UNAUTHORIZED") ||
-            errorMessage.includes("You must be logged in")
+            errorMessage.includes("You must be logged in") ||
+            errorMessage.includes("FORBIDDEN") ||
+            errorMessage.includes("administrator role")
           ) {
-            // Stop auto-refresh if user is not authenticated
-            const currentState = get();
-            if (currentState.isAutoRefreshing) {
-              currentState.stopAutoRefresh();
-              console.log("Auto-refresh stopped due to authentication error");
-            }
-          }
-        }
-      }
-    },
-
-    clearLogs: async () => {
-      try {
-        await vanillaTrpcClient.frontend.logs.clear.mutate();
-        set({ logs: [], totalCount: 0 });
-      } catch (error) {
-        console.error("Failed to clear logs:", error);
-
-        // Check if it's an authentication error
-        if (error && typeof error === "object" && "message" in error) {
-          const errorMessage = String(error.message);
-          if (
-            errorMessage.includes("UNAUTHORIZED") ||
-            errorMessage.includes("You must be logged in")
-          ) {
-            // Stop auto-refresh if user is not authenticated
+            // Stop auto-refresh — retrying won't fix a missing session or role.
             const currentState = get();
             if (currentState.isAutoRefreshing) {
               currentState.stopAutoRefresh();
               console.log(
-                "Auto-refresh stopped due to authentication error in clearLogs",
+                "Auto-refresh stopped due to authentication/authorization error",
               );
             }
           }

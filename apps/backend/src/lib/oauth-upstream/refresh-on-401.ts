@@ -29,8 +29,10 @@ import {
   OAuthTokens,
   redactToken,
   refreshAccessToken,
+  resolveIssuerStamp,
   resolveTokenEndpoint,
   resolveTokenEndpointAuthMethod,
+  stampIssuer,
   UpstreamTokenError,
 } from "./token-exchange";
 
@@ -173,6 +175,15 @@ async function doRefresh(
       error: error instanceof Error ? error.message : "internal_error",
     };
   }
+
+  newTokens = stampIssuer(
+    newTokens,
+    resolveIssuerStamp({
+      tokens: currentTokens,
+      clientInformation,
+      serverUrl: serverParams.url,
+    }),
+  );
 
   await oauthSessionsRepository.upsert({
     mcp_server_uuid: serverParams.uuid,

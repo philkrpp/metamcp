@@ -1,9 +1,18 @@
 import { z } from "zod";
 
-export const McpServerTypeEnum = z.enum(["STDIO", "SSE", "STREAMABLE_HTTP"]);
-export const McpServerStatusEnum = z.enum(["ACTIVE", "INACTIVE"]);
+// zod 4 types z.enum(...).options as a plain string[] rather than the
+// readonly literal tuple zod 3 produced. Drizzle's pgEnum needs a non-empty
+// literal tuple ([string, ...string[]]) to infer its column as the literal
+// union, so we keep the values as `as const` tuples and build both the zod
+// enum and the drizzle pgEnum from the same single source of truth.
+export const MCP_SERVER_TYPES = ["STDIO", "SSE", "STREAMABLE_HTTP"] as const;
+export const MCP_SERVER_STATUSES = ["ACTIVE", "INACTIVE"] as const;
+export const MCP_SERVER_ERROR_STATUSES = ["NONE", "ERROR"] as const;
 
-export const McpServerErrorStatusEnum = z.enum(["NONE", "ERROR"]);
+export const McpServerTypeEnum = z.enum(MCP_SERVER_TYPES);
+export const McpServerStatusEnum = z.enum(MCP_SERVER_STATUSES);
+
+export const McpServerErrorStatusEnum = z.enum(MCP_SERVER_ERROR_STATUSES);
 
 /**
  * RFC 7230 token characters for HTTP header field names.
@@ -632,6 +641,29 @@ export type UpdateMcpServerRequest = z.infer<
 
 export type UpdateMcpServerResponse = z.infer<
   typeof UpdateMcpServerResponseSchema
+>;
+
+// Reconnect: force-drop the gateway's pooled upstream connection(s) for a
+// server so every downstream consumer re-lists its tools on the next request.
+// The full cascade (active + idle slots) is what busts a warm pooled
+// connection still serving its connect-time tool list after an upstream
+// rename/add — the update path's idle-only refresh cannot.
+export const ReconnectMcpServerRequestSchema = z.object({
+  uuid: z.string().uuid(),
+});
+
+export const ReconnectMcpServerResponseSchema = z.object({
+  success: z.boolean(),
+  message: z.string().optional(),
+  error: z.string().optional(),
+});
+
+export type ReconnectMcpServerRequest = z.infer<
+  typeof ReconnectMcpServerRequestSchema
+>;
+
+export type ReconnectMcpServerResponse = z.infer<
+  typeof ReconnectMcpServerResponseSchema
 >;
 
 // Repository-specific schemas

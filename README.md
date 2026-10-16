@@ -1,221 +1,454 @@
-# 🚀 MetaMCP (MCP Aggregator, Orchestrator, Middleware, Gateway in one docker) <!-- omit in toc -->
+# MetaMCP — Umbrella IT Group fork
+
+> **A maintained downstream fork of [`metatool-ai/metamcp`](https://github.com/metatool-ai/metamcp).**
+> Upstream went effectively unmaintained from **2026-02-08 through mid-June 2026**. During that window we carried the community's open PRs plus our own reliability and security-hardening fixes on top of upstream, on the [`umbrella`](https://github.com/Umbrella-IT-Group/metamcp/tree/umbrella) branch — the default and deployable line of this repo. `main` mirrors upstream. MIT-licensed; upstream copyright preserved. Full change record: [`UMBRELLA_FORK.md`](UMBRELLA_FORK.md).
 
 <div align="center">
 
-<div align="center">
-  <a href="https://discord.gg/mNsyat7mFX" style="text-decoration: none;">
-    <img src="https://img.shields.io/badge/Discord-MetaMCP-5865F2?style=flat-square&logo=discord&logoColor=white" alt="Discord" style="max-width: 100%;">
-  </a>
-  <a href="https://docs.metamcp.com" style="text-decoration: none;">
-    <img src="https://img.shields.io/badge/Documentation-docs.metamcp.com-blue?style=flat-square&logo=book" alt="Documentation" style="max-width: 100%;">
-  </a>
-  <a href="https://opensource.org/licenses/MIT" style="text-decoration: none;">
-    <img src="https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square" alt="MIT License" style="max-width: 100%;">
-  </a>
-  <a href="https://github.com/metatool-ai/metamcp/pkgs/container/metamcp" style="text-decoration: none;">
-    <img src="https://img.shields.io/badge/GHCR-available-green.svg?style=flat-square&logo=github" alt="GHCR" style="max-width: 100%;">
-  </a>
-  <a href="https://deepwiki.com/metatool-ai/metamcp"><img src="https://img.shields.io/badge/DeepWiki-metatool--ai%2Fmetamcp-blue.svg?style=flat-square&logo=data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACwAAAAyCAYAAAAnWDnqAAAAAXNSR0IArs4c6QAAA05JREFUaEPtmUtyEzEQhtWTQyQLHNak2AB7ZnyXZMEjXMGeK/AIi+QuHrMnbChYY7MIh8g01fJoopFb0uhhEqqcbWTp06/uv1saEDv4O3n3dV60RfP947Mm9/SQc0ICFQgzfc4CYZoTPAswgSJCCUJUnAAoRHOAUOcATwbmVLWdGoH//PB8mnKqScAhsD0kYP3j/Yt5LPQe2KvcXmGvRHcDnpxfL2zOYJ1mFwrryWTz0advv1Ut4CJgf5uhDuDj5eUcAUoahrdY/56ebRWeraTjMt/00Sh3UDtjgHtQNHwcRGOC98BJEAEymycmYcWwOprTgcB6VZ5JK5TAJ+fXGLBm3FDAmn6oPPjR4rKCAoJCal2eAiQp2x0vxTPB3ALO2CRkwmDy5WohzBDwSEFKRwPbknEggCPB/imwrycgxX2NzoMCHhPkDwqYMr9tRcP5qNrMZHkVnOjRMWwLCcr8ohBVb1OMjxLwGCvjTikrsBOiA6fNyCrm8V1rP93iVPpwaE+gO0SsWmPiXB+jikdf6SizrT5qKasx5j8ABbHpFTx+vFXp9EnYQmLx02h1QTTrl6eDqxLnGjporxl3NL3agEvXdT0WmEost648sQOYAeJS9Q7bfUVoMGnjo4AZdUMQku50McDcMWcBPvr0SzbTAFDfvJqwLzgxwATnCgnp4wDl6Aa+Ax283gghmj+vj7feE2KBBRMW3FzOpLOADl0Isb5587h/U4gGvkt5v60Z1VLG8BhYjbzRwyQZemwAd6cCR5/XFWLYZRIMpX39AR0tjaGGiGzLVyhse5C9RKC6ai42ppWPKiBagOvaYk8lO7DajerabOZP46Lby5wKjw1HCRx7p9sVMOWGzb/vA1hwiWc6jm3MvQDTogQkiqIhJV0nBQBTU+3okKCFDy9WwferkHjtxib7t3xIUQtHxnIwtx4mpg26/HfwVNVDb4oI9RHmx5WGelRVlrtiw43zboCLaxv46AZeB3IlTkwouebTr1y2NjSpHz68WNFjHvupy3q8TFn3Hos2IAk4Ju5dCo8B3wP7VPr/FGaKiG+T+v+TQqIrOqMTL1VdWV1DdmcbO8KXBz6esmYWYKPwDL5b5FA1a0hwapHiom0r/cKaoqr+27/XcrS5UwSMbQAAAABJRU5ErkJggg==" alt="DeepWiki: MetaMCP"></a>
-</div>
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)](https://opensource.org/licenses/MIT)
+[![GHCR](https://img.shields.io/badge/GHCR-umbrella--it--group%2Fmetamcp-green.svg?style=flat-square&logo=github)](https://github.com/Umbrella-IT-Group/metamcp/pkgs/container/metamcp)
+[![Upstream](https://img.shields.io/badge/upstream-metatool--ai%2Fmetamcp-blue.svg?style=flat-square&logo=github)](https://github.com/metatool-ai/metamcp)
 
 </div>
 
-> **📢 Update:** *[From the author: apologize for some recent maintainence delay, but will at least keep merging PRs, more background [here](recent-updates.md)]*
-
-**MetaMCP** is a MCP proxy that lets you dynamically aggregate MCP servers into a unified MCP server, and apply middlewares. MetaMCP itself is a MCP server so it can be easily plugged into **ANY** MCP clients.
+**MetaMCP** is an MCP proxy that dynamically aggregates multiple MCP servers into a single unified MCP server and applies middleware. Because MetaMCP is itself an MCP server, it plugs into **any** MCP client. This fork keeps that product intact and concentrates on making it hold up as a long-running, self-hosted gateway.
 
 ![MetaMCP Diagram](metamcp.svg)
 
 ---
 
-For more details, consider visiting our documentation site: https://docs.metamcp.com
+## Contents
 
-English | [简体中文](./README_cn.md)
-## 📋 Table of Contents <!-- omit in toc -->
+- [Why this fork exists](#why-this-fork-exists)
+- [Stability](#stability)
+- [What we focus on](#what-we-focus-on)
+- [What we added over upstream](#what-we-added-over-upstream)
+- [Security](#security)
+- [Where we diverged from upstream](#where-we-diverged-from-upstream)
+- [Branch model](#branch-model)
+- [Relationship to upstream and attribution](#relationship-to-upstream-and-attribution)
+- [Quick start](#quick-start)
+- [Configuration](#configuration)
+- [Concepts](#concepts)
+- [Connect a client](#connect-a-client)
+- [Authentication](#authentication)
+- [Architecture](#architecture)
+- [Contributing and upstreaming](#contributing-and-upstreaming)
+- [License](#license)
+- [Credits](#credits)
 
-- [🎯 Use Cases](#-use-cases)
-- [📖 Concepts](#-concepts)
-  - [🖥️ **MCP Server**](#️-mcp-server)
-    - [🔐 **Environment Variables \& Secrets (STDIO MCP Servers)**](#-environment-variables--secrets-stdio-mcp-servers)
-  - [🏷️ **MetaMCP Namespace**](#️-metamcp-namespace)
-  - [🌐 **MetaMCP Endpoint**](#-metamcp-endpoint)
-  - [⚙️ **Middleware**](#️-middleware)
-  - [🔍 **Inspector**](#-inspector)
-  - [✏️ **Tool Overrides \& Annotations**](#️-tool-overrides--annotations)
-- [🚀 Quick Start](#-quick-start)
-  - [🐳 Run with Docker Compose (Recommended)](#-run-with-docker-compose-recommended)
-  - [📦 Build development environment with Dev Containers (VSCode/Cursor)](#-build-development-environment-with-dev-containers-vscodecursor)
-  - [💻 Local Development](#-local-development)
-- [🔌 MCP Protocol Compatibility](#-mcp-protocol-compatibility)
-- [🔗 Connect to MetaMCP](#-connect-to-metamcp)
-  - [📝 E.g., Cursor via mcp.json](#-eg-cursor-via-mcpjson)
-  - [🖥️ Connecting Claude Desktop and Other STDIO-only Clients](#️-connecting-claude-desktop-and-other-stdio-only-clients)
-  - [🔧 API Key Auth Troubleshooting](#-api-key-auth-troubleshooting)
-- [❄️ Cold Start Problem and Custom Dockerfile](#️-cold-start-problem-and-custom-dockerfile)
-- [🧾 Log Levels](#-log-levels)
-- [🔐 Authentication](#-authentication)
-- [🚦 Traffic Management](#-traffic-management)
-  - [🚧 **MCP Rate Limit**](#-mcp-rate-limit)
-- [🔗 OpenID Connect (OIDC) Provider Support](#-openid-connect-oidc-provider-support)
-  - [🛠️ **Configuration**](#️-configuration)
-  - [🏢 **Supported Providers**](#-supported-providers)
-  - [🔒 **Security Features**](#-security-features)
-  - [📱 **Usage**](#-usage)
-- [⚙️ Registration Controls](#️-registration-controls)
-  - [🎛️ **Available Controls**](#️-available-controls)
-  - [🏢 **Enterprise Use Cases**](#-enterprise-use-cases)
-  - [🛠️ **Configuration**](#️-configuration-1)
-- [🌐 Custom Deployment and SSE conf for Nginx](#-custom-deployment-and-sse-conf-for-nginx)
-- [🏗️ Architecture](#️-architecture)
-  - [📊 Sequence Diagram](#-sequence-diagram)
-- [🗺️ Roadmap](#️-roadmap)
-- [🌐 i18n](#-i18n)
-- [🤝 Contributing](#-contributing)
-- [📄 License](#-license)
-- [🙏 Credits](#-credits)
+## Why this fork exists
 
-## 🎯 Use Cases
-- 🏷️ **Group MCP servers into namespaces, host them as meta-MCPs, and assign public endpoints** (SSE or Streamable HTTP), with auth. One-click to switch a namespace for an endpoint.
--  🎯 **Pick tools you only need when remixing MCP servers.** Apply other **pluggable middleware** around observability, security, etc. (coming soon)
--  🔍 **Use as enhanced MCP inspector** with saved server configs, and inspect your MetaMCP endpoints in house to see if it works or not.
--  🔍 **Use as Elasticsearch for MCP tool selection** (coming soon)
+MetaMCP is a genuinely useful piece of infrastructure, and its author was candid about the maintenance slowdown (see upstream's [`recent-updates.md`](recent-updates.md)). For roughly four months there were no merges upstream while real, spec-level bugs sat in open PRs — chief among them an OAuth defect that disconnected Claude.ai custom MCP connectors every 60 minutes.
 
-Generally developers can use MetaMCP as **infrastructure** to host dynamically composed MCP servers through a unified endpoint, and build agents on top of it.
+When upstream stalled, those fixes needed to live on a line that could actually be built and shipped. So `umbrella` became that line: community PRs upstream hadn't reviewed yet, plus patches for defects that surface in long-running gateway deployments. In June 2026 upstream revived on its `ai-dev` branch and merged a large batch of community work — including several contributions from this fork. We reconciled which deltas converged upstream and made a deliberate decision to keep maintaining a separate line (details in [`UMBRELLA_FORK.md`](UMBRELLA_FORK.md)).
 
-Quick demo video: https://youtu.be/Cf6jVd2saAs
+## Stability
 
-![MetaMCP Screenshot](metamcp_screenshot.png)
+Upstream's `ai-dev` README links this repository directly, in its "Latest Update" banner:
 
-## 📖 Concepts
+> There is also a community maintained fork (ty a lot!): https://github.com/Umbrella-IT-Group/metamcp
 
-### 🖥️ **MCP Server**
-A MCP server configuration that tells MetaMCP how to start a MCP server.
+Two things to read honestly here. Upstream frames `ai-dev` as its **experimental** line — its own README asks you to *"test before you build the image based on this branch"* because it *"contains ai agent changes"* — and offers this fork as the community-maintained alternative. Upstream does **not** use the word "stable"; that framing is this fork's, not an upstream endorsement.
 
-```json
-"HackerNews": {
-  "type": "STDIO",
-  "command": "uvx",
-  "args": ["mcp-hn"]
-}
-```
+What we can state factually:
 
-#### 🔐 **Environment Variables & Secrets (STDIO MCP Servers)**
+- `umbrella` is the maintained, deployable line of this repo: every change lands there first, and the published image is built from it.
+- Every merge to `umbrella` passes type-check, lint, backend `vitest`, and a full production Docker build before it ships.
+- The fixes here are reliability and security-hardening fixes on top of upstream, and each ships with regression tests (the fork carries 300+ backend test cases beyond the upstream baseline).
 
-For **STDIO MCP servers**, MetaMCP supports three ways to handle environment variables and secrets:
+We make **no guarantee for your environment**. Read [`UMBRELLA_FORK.md`](UMBRELLA_FORK.md) for the full per-change record, and test the image before you depend on it — the same advice upstream gives for `ai-dev`.
 
-**1. Raw Values** - Direct string values (not recommended for secrets):
-```
-API_KEY=your-actual-api-key-here
-DEBUG=true
-```
+## What we focus on
 
-**2. Environment Variable References** - Use `${ENV_VAR_NAME}` syntax:
-```
-API_KEY=${OPENAI_API_KEY}
-DATABASE_URL=${DB_CONNECTION_STRING}
-```
+One thing: **reliability of a self-hosted gateway that stays connected**. The consumers this fork targets — Claude.ai custom connectors, Claude Code, n8n, and long-running agents — hold long-lived sessions and reconnect poorly when a backend or the gateway restarts under them. Our work concentrates on four properties:
 
-**3. Auto-matching** - If the expected environment variable name in your tool matches the container's environment variable, you can omit it entirely. MetaMCP will automatically pass through matching environment variables.
+- **Session survival across restarts** — a gateway restart, a backend container swap, or a transport drop should be transparent to connected clients, not a manual `reconnect` ritual.
+- **OAuth longevity** — connectors authenticate once and stay authenticated, instead of dropping on a hardcoded 1-hour token.
+- **Access control (RBAC)** — not every authenticated user should be a full admin.
+- **Observability** — who called which tool, whether a backend is actually reachable, and what the pool is really doing.
 
-> **🔒 Security Note**: Environment variable references (`${VAR_NAME}`) are resolved from the MetaMCP container's environment at runtime. This keeps actual secret values out of your configuration and git repository.
+## What we added over upstream
 
-> **⚙️ Development Note**: For local development with `pnpm run dev:docker`, ensure your environment variables are listed in `turbo.json` under `globalEnv` to be passed to the development processes. This is not required for production Docker deployments.
+Grouped by the property they defend. Every entry maps to one or more fork PRs documented in [`UMBRELLA_FORK.md`](UMBRELLA_FORK.md).
 
-### 🏷️ **MetaMCP Namespace**
-- Group one or more MCP servers into a namespace
-- Enable/disable MCP servers or at tool level
-- Apply middlewares to MCP requests and responses
-- Override tool names/titles/descriptions per namespace and attach custom MCP annotations (e.g. `{ "annotations": { "readOnlyHint": false } }`)
+### Session survival across restarts
 
-### 🌐 **MetaMCP Endpoint**
-- Create endpoints and assign namespace to endpoints
-- Multiple MCP servers in the namespace will be aggregated and emitted as a MetaMCP endpoint
-- Choose between API-Key Auth (in header or query param) or standard OAuth in MCP Spec 2025-06-18
-- Host through **SSE** or **Streamable HTTP** transports in MCP and **OpenAPI** endpoints for clients like [Open WebUI](https://github.com/open-webui/open-webui)
+- **Session-lost and transport-lost recovery** — detectors that recognize the many wrap shapes of a dead backend session (`-32600 "Session not found"`) or a dead transport (`"Not connected"`), walking `.cause` chains and nested envelopes, wired into every proxy call site (tools/call, dynamic-find, aggregate list handlers, and the OpenAPI bridge). Recovery invalidates the stale pooled connection and retries once, transparently. A tool call is retried only when the failure proves the backend never ran it (an HTTP 404 "Session not found" answer, or a transport closed before the send); a timeout or a connection dropped mid-call reaches the client instead, so the gateway does not re-send a call that may already have executed.
+- **Lazy session recovery across gateway restarts** — session metadata is persisted to an `mcp_sessions` table on init (session id, namespace, endpoint, hashed auth principal, init params). After the gateway restarts with an empty in-memory pool, a returning client's cached `Mcp-Session-Id` is re-validated against the table in constant time, the transport is rebuilt, and the request is replayed — including replaying the MCP `initialize` handshake so the rebuilt transport is actually usable.
+- **`boot_id` + `capability_hash` recovery gating** — recovery is allowed only when the gateway's advertised capability set is unchanged since the session was created. A frozen capability object is both declared on the server and hashed; a matching hash means recovery is safe, a differing hash forces a clean re-init. This prevents handing a client a transport whose negotiated capabilities are stale.
+- **Auto-nuke stale sessions on capability change** — on the first boot after a capability change, rows whose `capability_hash` no longer matches are deleted in one pass, so a capability-changing deploy surfaces the client re-init path at most once instead of wedging sessions indefinitely.
 
-### ⚙️ **Middleware**
-- Intercepts and transforms MCP requests and responses at namespace level
-- **Built-in example**: "Filter inactive tools" - optimizes tool context for LLMs
-- **Future ideas**: tool logging, error traces, validation, scanning
+### Connection-pool robustness
 
-### 🔍 **Inspector**
-Similar to the official MCP inspector, but with **saved server configs** - MetaMCP automatically creates configurations so you can debug MetaMCP endpoints immediately.
+- **Subprocess leak fix** — child processes of terminated STDIO servers no longer leak and eventually OOM the host (graceful SIGTERM + a concurrency-safe idle-session guard).
+- **LRU eviction at the global connection cap** — the total-connections cap is a soft LRU bound, not a hard refuse that deadlocks the pool when it fills with persistent sessions.
+- **Connection caps honor their env vars** — `MAX_TOTAL_CONNECTIONS` / `MAX_CONNECTIONS_PER_SERVER` are actually enforced (a long-standing bug had the singleton hardcode 100 / 5 regardless of configuration).
+- **HTTP/SSE transport-drop detection + exponential reconnect backoff** — parity with STDIO's process-crash handling, so idle HTTP/SSE backends don't sit on dead sockets after a container swap.
+- **Active-connection health sweeps + half-open probes** — active pooled connections are health-checked (not just idle ones), and error-gated backends get a periodic half-open probe so a recovered backend heals hands-free.
+- **Public-session TTL sweeper** — idle public StreamableHTTP sessions are reaped on a configurable TTL (row-preserving, so the consumer lazy-recovers on its next request), fixing pool saturation from clients that never send a `DELETE`.
 
-### ✏️ **Tool Overrides & Annotations**
-- Open a namespace → **Tools** tab to see every tool coming from connected MCP servers.
-- Each saved tool can be expanded and edited inline: update the display **name/title/description** or provide a JSON blob with namespace-specific annotations (for example `{ "annotations": { "readOnlyHint": false } }`).
-- Badges in the table ("Overridden", "Annotations") show which tools currently have custom metadata. Hover them to read a tooltip describing what was overridden.
-- Annotation overrides are merged with whatever the upstream MCP server returns, so you can safely add custom UI hints without losing provider metadata.
+### OAuth longevity
 
-## 🚀 Quick Start
+- **OAuth `refresh_token` grant** — implements the refresh-token grant that upstream advertised in discovery metadata but rejected at the token endpoint (the root cause of connectors dropping every 60 minutes). Refresh tokens are single-use / rotate on redemption.
+- **Env-configurable token TTLs** — access, refresh, and better-auth session lifetimes are all env-var configurable, with defaults tuned for connectors that lack revoke-friendly UX: **24h access / 365d refresh / 30d session**.
 
-### **🐳 Run with Docker Compose (Recommended)**
+### Access control
 
-Clone repo, prepare `.env`, and start with docker compose:
+- **RBAC admin gate on tRPC mutations** — a `users.role` (`admin` / `member`) surfaced into the session; an `adminProcedure` gates all destructive/config mutations (create/update/delete of servers, namespaces, endpoints; namespace curation; tools catalog writes; global config; API-key administration; public-key minting). Members keep read surfaces and manage their own private keys. Plus API-key `last_used_at` telemetry. Administrators are named by configuration; see [Administrators](#administrators).
+- **Admin list-all**: `namespaces.listAll`, `endpoints.listAll` and `mcpServers.listAll` are admin-only and return every row with its owner (`user_id`, null for public), so administrators can see rows owned by other users. Opening, editing or deleting such a row still requires being its owner. The existing `list` procedures are unchanged (public rows plus the caller's own, for admins too), because consumers that match rows by name, such as a config sync over `mcpServers.list`, must not start seeing rows they never saw before. The namespace create form always creates a public namespace and no longer offers a "For myself" option, which never made a namespace private.
+- **Per-namespace tool policy**: each namespace is either `allow_all` (the default: a tool with no curation row is served, so a tool added to a server later appears there without review) or `allowlist` (only tools switched on in the namespace are listed or callable, so a new tool stays hidden until an administrator switches it on). Set with the admin-only `namespaces.setToolPolicy` (audited as `namespace.tool_policy`; also a switch on the namespace page) and returned as `tool_policy` on every namespace response. A tools refresh in an allowlist namespace records new tools switched off and never changes an existing tool's state. Saving a namespace's server list reconciles rows: rows of servers that left the list are deleted, retained tool and server rows keep their status, overrides and identity, and new tool rows start ACTIVE under `allow_all` and INACTIVE under `allowlist` ([#212](https://github.com/Umbrella-IT-Group/metamcp/pull/212)). Ships inert: every existing namespace is `allow_all`, and setting it back is the rollback.
+- **Endpoint access groups** — named groups that decide which OAuth users may reach which endpoints, so publishing one connector per business system no longer means publishing all of them to everyone who can log in. See [Access groups](#access-groups).
+- **API-key IP allowlists**: per-key or global CIDR lists in audit or enforce mode, checked on the data plane, token introspection and the admin-plane bearer. OAuth is never affected. See [API-key IP allowlists](#api-key-ip-allowlists).
+
+### Observability
+
+- **`/health/upstream` rollup** — a health endpoint reporting per-backend reachability and pool config, truthful for down HTTP/SSE backends (which never trip the STDIO crash breaker).
+- **Live Logs with consumer identity + tool-call auditing** — the Live Logs view records connection, tool-call, client-session, and server events with categories and filters; every proxied `tools/call` is audited with the authenticated caller (API-key name or OAuth email), tool, backend, duration, and outcome. A persistent `tool_call_audit` table stores a hash of arguments with configurable retention. Argument values are never stored, with one deliberate exception: the value of six allowlisted selector keys (`mode`, `action`, `profile`, `operation`, `entity`, `method`) when it is a short identifier. The argument key names are stored too (`args_shape`), so "which mode, which parameters" friction is queryable per consumer. A tool's structured in-band refusal (an `error` envelope on a result with `isError` unset) is recorded as a failure too, with the tool's own code token in `error_detail`; see [Audit outcome classes](#audit-outcome-classes).
+- **Durable gateway event history** — the Live Logs page has a **History** mode backed by a persistent `gateway_events` table, so connection, client-session, server and system activity survives a restart instead of living only in a 2000-entry in-memory buffer. Browsable by time range, category, level, server, client and message substring, with keyset paging. Rows are **immutable for 30 days** at the database level (UPDATE and TRUNCATE are refused at any age; DELETE is refused inside the window), and age out after `GATEWAY_EVENTS_RETENTION_DAYS`.
+
+### No-reboot tool updates
+
+- **`tools/list_changed` propagation** — the gateway advertises `listChanged: true` and forwards backend tool-list changes to clients, instead of requiring a reconnect to learn about new/removed tools.
+- **Full-definition tool hashing + periodic sweep** — tool-list drift is detected on the full `{name, description, inputSchema}` (not just names), and a periodic pull sweep catches updates that arrive as container replacements (where no push notification survives).
+- **Per-server "Reconnect Server"** — a UI action that flushes a single backend's pooled connection without restarting the gateway.
+
+## Security
+
+This fork treats the gateway as an internet-facing, multi-user service and hardens it
+accordingly. Beyond the reliability work above, the `umbrella` branch adds defense-in-depth
+across the management and OAuth surfaces:
+
+- **Role-based access control** on the management API and the Inspector/proxy routes — admin
+  actions and diagnostics require an admin session, not merely an authenticated one.
+- **Secret redaction** in API responses — API-key values, per-server credentials, and OAuth
+  tokens are never returned in list/get/update payloads.
+- **API keys hashed at rest** — the `api_keys` table stores a SHA-256 of each key plus its
+  last four characters, never the key itself, so read access to that table (a backup, a
+  replica, a `psql` session) no longer yields working credentials. A key is shown exactly
+  once, in the response that mints it; it cannot be read back out of `api_keys` afterwards, so
+  an uncopied key must be re-minted. Bearer tokens configured on MCP-server rows are a separate
+  store and are still held as given — including the freshly minted key an auto-created endpoint
+  server is configured with — so `mcp_servers.bearer_token` remains in scope for database-read
+  exposure. Existing keys keep working across the upgrade — the migration hashes what is
+  already stored rather than requiring a re-mint. `BOOTSTRAP_API_KEYS` entries consequently
+  require a `key` value that the operator generates: with nothing readable stored, bootstrap
+  cannot invent a key and hand it back, so an entry without one is skipped with a warning
+  rather than silently creating a credential nobody can obtain. Re-declaring a different value
+  for an existing key name rotates that key.
+- **Fail-closed registration** — self-registration defaults to disabled and stays disabled
+  across restarts; unauthenticated endpoints require an explicit opt-in.
+- **Bounded Dynamic Client Registration** — field/size caps, a scoped body limit, retention of
+  unused clients, and a dedicated rate-limit bucket.
+- **Per-caller rate limiting on password sign-in** — the credential sign-in endpoint is capped
+  per client IP, which also bounds how fast the append-only audit log can be filled with failed
+  logins. SSO, callbacks, session reads and sign-out are deliberately not capped. See
+  [Sign-in rate limiting](#sign-in-rate-limiting).
+- **Hardened OAuth surface** — allowlisted redirect URIs at authorize time, authenticated token
+  introspection, and consent protection on the authorize flow.
+- **Tamper-evident audit logging** of authentication and administrative events.
+- **Optional NOSUPERUSER runtime database role** — the gateway can serve requests with a
+  credential that is allowed to append to the audit tables and not to rewrite them. See below.
+
+### Separating the runtime credential from the migration credential
+
+By default the gateway connects with `DATABASE_URL`, which on the `postgres:16-alpine` image
+is the cluster bootstrap **superuser**, and that same credential serves both `drizzle-kit
+migrate` and the running application. A superuser bypasses `GRANT`s outright and can disable a
+trigger for its own session or drop it, so the append-only triggers on `audit_log` are
+bypassable by the credential the gateway is holding every second it is running. Migrations
+genuinely need that privilege. Serving requests does not.
+
+Setting **`METAMCP_RUNTIME_DB_PASSWORD`** splits the two. The container entrypoint runs
+`scripts/ensure-runtime-role.sh` after migrations and before either server process starts; it
+creates (or converges) a `NOSUPERUSER LOGIN` role, grants it ordinary DML on the application
+tables, and revokes the verbs that define immutability. The backend then reports at boot which
+role it authenticated as and whether that role is a superuser.
+
+| Table | Runtime role keeps | Runtime role is refused | Why |
+|---|---|---|---|
+| Ordinary application tables | `SELECT, INSERT, UPDATE, DELETE` | `TRUNCATE`, DDL | The gateway's normal working set. |
+| `audit_log` | `SELECT, INSERT` | `UPDATE, DELETE, TRUNCATE` | Append-only. Nothing prunes it in-app; its retention is a deliberate ops-level act performed as the owner. |
+| `tool_call_audit` | `SELECT, INSERT, DELETE` | `UPDATE, TRUNCATE` | `DELETE` stays because the `TOOL_AUDIT_RETENTION_DAYS` pruner removes aged rows, and migration `0032` narrows that `DELETE` to rows older than 30 days. See the note below. |
+| `gateway_events` | `SELECT, INSERT, DELETE` | `UPDATE, TRUNCATE` | Same shape and same reason: the `GATEWAY_EVENTS_RETENTION_DAYS` sweeper needs `DELETE`, and migration `0031` narrows it to rows older than 30 days. |
+| `drizzle` schema (migration journal) | nothing | everything | Never granted. A runtime role that can edit the journal can make a migration appear applied. |
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `METAMCP_RUNTIME_DB_PASSWORD` | unset | **The switch.** Password for the runtime role; setting it enables the split. |
+| `METAMCP_RUNTIME_DB_ROLE` | `metamcp_runtime` | Runtime role name. |
+| `RUNTIME_DATABASE_URL` | unset | Escape hatch: a full connection string used verbatim, for a separate host, a pooler, or a managed instance where the role is provisioned outside this repo. Wins over the two above, and does **not** run the entrypoint's ensure-role step. |
+
+Cutover order:
+
+1. Set `METAMCP_RUNTIME_DB_PASSWORD` in `.env` to a strong value.
+2. `docker compose up -d` (a recreate, not a restart — the variable has to reach the entrypoint).
+3. Confirm the boot log carries `Runtime DB role check (main pool): connected as "metamcp_runtime", rolsuper=false` and the same for the audit pool and the gateway-events pool (all three request-path pools are checked). The failure shape is the same line with `rolsuper=true` and the words `remain bypassable by this credential`, which means the split did not take. It is also written to `audit_log` as `db.runtime_split.ineffective`, so it can be alerted on rather than only watched for.
+
+The dev stack (`docker-compose.dev.yml`) runs the same step from its own entrypoint, so it honours the switch too. Both compose files read the same `.env`.
+
+**How far the grants go on their own.** `audit_log` is refused all three wipe verbs, so its grants alone make it append-only. `tool_call_audit` and `gateway_events` both have to keep `DELETE` for their retention sweepers, so grants alone could not stop that credential emptying either table rather than pruning its aged tail. Migrations `0032` and `0031` close the difference with database triggers, identical on both: `UPDATE` and `TRUNCATE` are refused outright at any row age, and `DELETE` is refused for any row inside the last 30 days. Neither sweeper is affected at its 90-day default, which is 60 days past that boundary, and neither can be configured into the window: both retention variables are floor-clamped to 30 at boot with a warning, so the application never issues a prune the database would refuse.
+
+**What none of this covers.** A superuser can still disable a trigger or set `session_replication_role`, and the owner of a table can disable its triggers. That break-glass path is left open on purpose, for a legal hold or a corrupted row, and using it is worth recording because at the database level it is indistinguishable from tampering. Enabling the split is what puts it out of the gateway's own reach: the runtime role is `NOSUPERUSER` and does not own these tables, so it holds neither lever.
+
+Leaving the variable unset is fully supported and changes nothing: the entrypoint step is
+skipped and the gateway connects with `DATABASE_URL` exactly as before.
+
+**Adding an audit table later:** the ensure-role script uses `ALTER DEFAULT PRIVILEGES`, so a
+table created by a future migration starts out fully writable by the runtime role. Any new
+append-only table must be added to the revoke list in `scripts/ensure-runtime-role.sh`; a test
+asserts that every table a migration protects with an immutability trigger appears there.
+
+See [`UMBRELLA_FORK.md`](UMBRELLA_FORK.md) for the per-change record. Report a security weakness through
+[`SECURITY.md`](SECURITY.md), and anything else through [GitHub Issues](https://github.com/Umbrella-IT-Group/metamcp/issues). Several of these items apply to upstream unchanged; we coordinate them privately
+with the upstream maintainers before any public detail.
+
+## Where we diverged from upstream
+
+These are deliberate, documented differences from `metatool-ai/metamcp`.
+
+- **Single-tenant posture.** This gateway serves a single organization and connects to each backend MCP server using shared, static, per-server service credentials configured on the gateway. We do not model per-caller identity flowing through to backends (with one scoped exception, below).
+- **We declined the multi-tenant per-server header-forwarding path (upstream [#256](https://github.com/metatool-ai/metamcp/pull/256)).** That PR forwards per-client headers to backends to enable cross-tenant routing. It merged upstream, but it does not fit this fork's model: backends authenticate via shared service credentials, so per-client header forwarding adds attack surface and complexity for a capability the fork deliberately doesn't want. We do not carry it.
+- **Default-public visibility, OAuth-on endpoints.** New namespaces/endpoints/servers default to "Everyone" ownership and new endpoints default OAuth-on — an Umbrella-specific policy stance, not upstream's default.
+- **Per-user Microsoft 365 delegated-token broker** (Umbrella-specific extension). A scoped, opt-in exception to the single-tenant posture: for one designated backend, the gateway mints a per-user delegated Graph token request-scoped via `AsyncLocalStorage`, with encrypted token custody. Upstream has no per-user backend-credential concept; this lives entirely in our line.
+- **Branding.** MetaMCP wordmarks are replaced with the Umbrella IT Group brandmark on the sidebar and browser tab. Cosmetic and fork-specific.
+
+## Branch model
+
+| Branch | Role |
+|---|---|
+| `umbrella` | Our integration line. **Default branch.** All deployable work lives here; built into `ghcr.io/umbrella-it-group/metamcp:latest`. |
+| `main` | Mirror of upstream `metatool-ai/metamcp:main`. We never push our changes here. |
+| `feature/<name>` | Short-lived per-PR branches off `umbrella`, squash-merged and deleted. |
+
+Note: after upstream's June 2026 revival on `ai-dev`, we made a deliberate decision to **stay on frozen `main`** rather than rebase onto `ai-dev`. Several of our patches converged upstream in that revival; we continue to carry them as deltas by choice, because our line has diverged (single-tenant posture, RBAC, M365 broker, zod v4 / MCP SDK 1.29) in ways a blanket rebase would fight. See [`UMBRELLA_FORK.md`](UMBRELLA_FORK.md) for the convergence record and the reasoning.
+
+## Relationship to upstream and attribution
+
+This fork exists because of, and on top of, `metatool-ai/metamcp` by James Zhang. Credit and thanks to the upstream author and to every community contributor whose PRs we carry.
+
+Some of our work merged back upstream during the June 2026 `ai-dev` revival — the OAuth/session-lifetime configurability, the session-recovery error detectors, and the 404 re-init fix among them. Where a patch we authored is generic (not Umbrella-specific), we file it upstream; the "Our own patches" table in [`UMBRELLA_FORK.md`](UMBRELLA_FORK.md) doubles as that backlog.
+
+Upstream community resources (Discord, docs, DeepWiki) live at [`metatool-ai/metamcp`](https://github.com/metatool-ai/metamcp) and [docs.metamcp.com](https://docs.metamcp.com).
+
+## Quick start
+
+### Run the prebuilt image
 
 ```bash
-git clone https://github.com/metatool-ai/metamcp.git
+docker pull ghcr.io/umbrella-it-group/metamcp:latest
+```
+
+Wire it into your own `docker-compose.yml` alongside a Postgres instance. The image is amd64, public (no registry login needed), and published when a push to `umbrella` changes a path watched by [the build workflow](.github/workflows/umbrella-build.yml). If the pull is denied, please [open an issue](https://github.com/Umbrella-IT-Group/metamcp/issues) with the exact error text, with secrets and internal hostnames redacted.
+
+### Build from source with Docker Compose
+
+`umbrella` is the default branch, so a plain clone lands you on the deployable line:
+
+```bash
+git clone https://github.com/Umbrella-IT-Group/metamcp.git
 cd metamcp
-cp example.env .env
+cp example.env .env   # then edit .env
 docker compose up -d
 ```
 
-If you modify APP_URL env vars, make sure you only access from the APP_URL, because MetaMCP enforces CORS policy on the URL, so no other URL is accessible.
+Edit `.env` before that first `docker compose up`. `POSTGRES_PASSWORD` has no default in any of the compose files: leave it unset and compose stops and names it, rather than falling back to a password published in this repository. `example.env` assigns it an obvious placeholder, which is enough to get past that check but is not a password. Replace it. `BETTER_AUTH_SECRET` is required the same way and for a sharper reason: it is the session signing key, so whoever holds it can mint a session cookie for any account without a password, and its old compose default was published here too. Generate one with `openssl rand -hex 32`. Unlike `POSTGRES_PASSWORD` it has no initdb coupling, so an existing deployment can change it at any time; doing so invalidates sessions signed with the old key and signs everyone out once. Upgrading an existing deployment: Postgres reads `POSTGRES_PASSWORD` only when the data volume is first initialized, so a volume created under the old published default keeps that password until you run `ALTER USER metamcp_user WITH PASSWORD '<new>'` in the running database; set `.env` to whatever the volume actually uses, or rotate with `ALTER USER` first, otherwise the app fails Postgres authentication on next start. The other thing to edit is the bootstrap account. This fork ships **registration closed** (`BOOTSTRAP_DISABLE_REGISTRATION_UI=true`, see [Registration controls](#registration-controls)), so nobody can self-register a first administrator through the UI: the account bootstrap creates is the only way in. Out of the box that is `example.env`'s placeholder `BOOTSTRAP_USER_EMAIL` / `BOOTSTRAP_USER_PASSWORD` pair (`test@user.example` / `REPLACE_ME__generate_a_strong_password`), which is a placeholder rather than credentials you want on a running gateway. The backend warns loudly at boot if that placeholder is still the configured password, and again if `BETTER_AUTH_SECRET` is still `example.env`'s. Set `BOOTSTRAP_USERS` (a JSON array, the recommended form) or those two single-user variables to real values first.
 
-Note that the pg volume name may collide with your other pg dockers, which is global, consider rename it in `docker-compose.yml`:
+The compose files publish both ports on loopback (`127.0.0.1:12008` and `127.0.0.1:9433`) rather than every host interface, so a box with a public IP does not expose the unauthenticated app port or the raw Postgres port to the network by default. `localhost:12008` still works on the host. To reach the app from another machine, put a reverse proxy or an SSH tunnel in front of it rather than widening the bind. This matches the loopback posture the platform overlay enforces on the real deployment.
 
-```
-volumes:
-  metamcp_postgres_data:
-    driver: local
-```
+If you change `APP_URL`, access the app only from that URL. MetaMCP applies CORS per route: the OAuth discovery endpoints allow any origin, while the app and API routes (`/api/auth`, `/trpc`, `/mcp-proxy`, `/metamcp`) are restricted to an allowlist of `APP_URL` plus any origins you add to `EXTRA_TRUSTED_ORIGINS` (comma-separated). The Postgres volume name is global and may collide with other Postgres containers; rename `metamcp_postgres_data` in `docker-compose.yml` if needed.
 
-### **📦 Build development environment with Dev Containers (VSCode/Cursor)**
-
-You can use the VSCode/Cursor extension to build the development environment in a container.
-
-It only requires that you have an environment running Docker or a similar alternative (the `docker`/`docker compose` command is required), and no other dependent components need to be installed on your host machine.
-
-1. First, clone the MetaMCP source code, open project in Visual Studio Code.
-```bash
-git clone https://github.com/metatool-ai/metamcp.git
-cd metamcp
-code .
-```
-2. Switch to Dev Containers. Open the VSCode Command Palette, and execute `Dev Containers: Reopen in Container`.
-
-VSCode will open the Dev Containers project in a new window, where it will build the runtime and install the toolchain according to the `Dockerfile` before starting the connection and finally installing the MetaMCP dependencies.
-<img width="895" height="153" alt="image" src="https://github.com/user-attachments/assets/d3e1420d-43c1-4ed6-9229-b91ea09c142a" />
-
-> **note**
-> This process requires a reliable network connection, and it will access Docker Hub, GitHub, and some other sites. You will need to ensure the network connection yourself, otherwise the container build may fail.
-
-Wait some minutes, depending on the internet connection or computer performance, it may take from a few minutes to tens of minutes, you can click on the Progress Bar in the bottom right corner to view a live log where you will be able to check unusual stuck.
-<img width="732" height="173" alt="image" src="https://github.com/user-attachments/assets/6e5752f8-7353-4a8f-b489-c13daef6700e" />
-
-After finished, you can run `pnpm dev` to start the development server.
-
-### **💻 Local Development**
-
-Still recommend running postgres through docker for easy setup:
+### Local development
 
 ```bash
 pnpm install
 pnpm dev
 ```
 
-## 🔌 MCP Protocol Compatibility
+(Postgres via Docker is still the easy path for local dev.) Common gates: `pnpm check-types`, `pnpm lint`, `pnpm --filter @metamcp/backend test` (backend vitest), `pnpm build`.
 
-- ✅ **Tools, Resources, and Prompts** supported
-- ✅ **OAuth-enabled MCP servers** tested for 03-26 version
+## Configuration
 
-If you have questions, feel free to leave **GitHub issues** or **PRs**.
+Standard upstream configuration (Postgres, `APP_URL`, OIDC/SSO, rate limits) is unchanged; see [`example.env`](example.env). Three upstream DEFAULTS change in this fork: the registration controls, and `POSTGRES_PASSWORD` and `BETTER_AUTH_SECRET`, whose published compose defaults are removed rather than replaced (both variables are now required). Everything else below is additive. All are optional; defaults are shown.
 
-## 🔗 Connect to MetaMCP
+The database-credential variables (`METAMCP_RUNTIME_DB_PASSWORD`, `METAMCP_RUNTIME_DB_ROLE`, `RUNTIME_DATABASE_URL`) are documented with their grant matrix under [Security](#separating-the-runtime-credential-from-the-migration-credential) rather than repeated here.
 
-### 📝 E.g., Cursor via mcp.json
+### Registration controls
 
-Example `mcp.json`
+| Variable | Default | Purpose |
+|---|---|---|
+| `BOOTSTRAP_DISABLE_REGISTRATION_UI` | `true` (upstream: `false`) | Disable self-service signup in the web UI. |
+| `BOOTSTRAP_DISABLE_REGISTRATION_SSO` | `true` (upstream: `false`) | Disable account creation on a first SSO/OIDC login. |
+
+Both fail closed: an unset variable, or an unparseable one, reads as `true`, so a deploy that never mentions them does not silently run with open self-registration. Provision accounts through `BOOTSTRAP_USERS` instead, or flip a control off deliberately.
+
+Bootstrap is exempt from its own lock, and it has to be. It creates the configured accounts by signing them up through the same route `DISABLE_SIGNUP` closes, and it writes that flag to the `config` table on every run, so from the second boot onward the flag is already stored `true` when bootstrap starts. With `BOOTSTRAP_RECREATE_USER=true` the administrator (and its user-scoped API keys) is deleted before the re-signup, so a refusal there would leave an ordinary restart with no administrator, registration closed, and the keys unrecoverable. Bootstrap therefore opens a signup exemption around its user pass and closes it in a `finally` immediately after. The exemption is not reachable from outside the process: all of this runs before the HTTP server starts listening, so no request can arrive while it is open, and it covers only bootstrap's own accounts, never a request. The created account is still recorded in the audit log like any other.
+
+One limit worth knowing: these controls are only asserted when bootstrap runs at all. A `BOOTSTRAP_ENABLE=false` deploy writes no row, which upstream's readers treat as open, so such a deploy keeps upstream's behaviour and has to close registration by hand in the admin UI.
+
+### Administrators
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `METAMCP_ADMIN_EMAIL` | unset | Comma-separated email addresses of existing accounts to promote to `admin` on every boot. Matched case-insensitively. |
+
+Accounts get the `member` role by default, and only an administrator can change admin-gated settings or curate servers, namespaces, endpoints and API keys. There is no UI path to grant the role, so the deployment names its administrators here and every boot converges the database toward that list. It runs after migrations and environment bootstrap, so an account `BOOTSTRAP_USERS` creates is promoted on the same boot, and before the server starts listening. It is independent of `BOOTSTRAP_ENABLE`.
+
+- **Named accounts only.** Nothing is ever promoted by position (no "first user" or "only user" rule).
+- **Never demotes.** Removing an address from the list leaves that account an administrator; demote it deliberately in the database.
+- **Never creates accounts.** An address with no account logs a warning and is promoted on the first boot after the account exists.
+- **Ambiguous addresses are skipped.** If one address matches two accounts that differ only in letter case, neither is promoted and a warning says so.
+- **Audited.** Each promotion writes a `user.role.set` row to `audit_log` (`actor_type` `system`, `detail.source` `admin_email_env`). A restart that changes nothing writes nothing.
+- **Unset is a no-op.** With the variable unset or empty, nothing is written; the boot log records how many administrators exist.
+
+If no administrator exists after the pass, the boot log carries a `NO ADMINISTRATOR` warning naming this variable and the SQL fallback: `UPDATE users SET role = 'admin' WHERE email = '<address>';`. **Upgrading an existing install past migration `0020`** turns every existing account into a `member`, so set `METAMCP_ADMIN_EMAIL` to your own address before (or right after) the upgrade and restart.
+
+Admin identity is a deployment concern, not a committed one: name it through `METAMCP_ADMIN_EMAIL`, not a literal baked into a committed migration. Two early seed migrations (`0020_users_role.sql`, `0022_promote_ci_admin.sql`) predate this and promote specific addresses by literal; they are left in place because they have already run in production and this repository's history is public, so rewriting them would change nothing an attacker cannot already read while breaking every deployed migration checksum. The `migrations-no-email-literals` backend test fails any migration written after the current head that reintroduces an address literal, so the seed identities stay a bounded, historical residual.
+
+### Sign-in rate limiting
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `AUTH_SIGNIN_RATE_LIMIT_MAX` | `20` | Password sign-in attempts allowed per window, per client IP. Unparseable, zero and negative values fall back to the default with a boot warning rather than being honoured — a `0` would refuse every sign-in. Capped at `1000`, above which it is not a bound. |
+| `AUTH_SIGNIN_RATE_LIMIT_WINDOW_SECONDS` | `600` (10m) | Length of the fixed window. Same fallback rule: `0` would expire the window on every request and silently remove the limit. Capped at `86400` (24h), so a refused caller is never locked out for longer than a day. |
+| `AUTH_SIGNIN_RATE_LIMIT_DISABLED` | unset (limiter on) | Set to exactly `true` to turn the limiter off. Phrased negatively on purpose: unset, empty and misspelled all leave it on. |
+
+`POST /api/auth/sign-in/email` is the only path this covers, and the exclusions are deliberate. SSO entry (`sign-in/social`, `sign-in/oauth2`) and its callbacks carry no credential and are the flows a lockout would break; `get-session` is read on nearly every page render; `sign-out` must never be answered with "try again later"; and dynamic client registration (`/api/auth/register`) already has its own bucket and is what the loopback OAuth pairing depends on.
+
+The key is the edge-supplied client IP (`CF-Connecting-IP`), the same key the failed-auth, registration and `/trpc` limiters use — not `req.ip`, which is one shared in-container address for every caller behind the frontend rewrite and would make the limiter an organisation-wide lockout rather than a bound. **Requests arriving without that header are exempt rather than pooled into one bucket**, for the same reason: a shared bucket would be the lockout. The honest cost is that a caller reaching the origin directly, beside the tunnel, is not bounded by this.
+
+Better-auth's own rate limiter stays pinned off and should not be enabled instead. Its address resolution reads `x-forwarded-for` only and accepts it solely when it carries exactly one entry, so behind a proxy chain every caller collapses into the literal bucket `no-trusted-ip` — at 3 sign-ins per 10 seconds, shared globally.
+
+A refusal is a `429` with a `Retry-After` and writes no audit row (a row per refusal would amplify the writes being bounded); it is reported to the log instead, at most one line a minute, carrying a running total since startup.
+
+#### Per-credential session ceiling
+
+`MCP_MAX_SESSIONS_PER_CREDENTIAL` (default `100`, `0` disables) limits new-session admissions per credential; a credential at the limit gets a `429` on its next `initialize` unless one of its idle sessions can be evicted to make room (see below). Past 80% the gateway logs `Concurrent-session usage high for <method> credential "<name>": N/M live sessions`, and at the limit `Concurrent-session ceiling reached ...`, plus a throttled `client` gateway event.
+
+Those lines now end with a short clause saying what is filling the credential, for example `live: autotask=21, itglue=21, ninja=21 (top 5 of 14 endpoints); in-flight 187, idle 113, oldest idle 1710s`: sessions per endpoint (highest first, at most five names), how many hold a request in flight (an open stream counts) versus idle, and how long the quietest idle one has been silent. Sessions the idle sweeper does not track (SSE) are counted as `untracked`. A mostly-idle, old set means abandoned sessions from a client that never closes them; a mostly in-flight set means open streams. The clause carries counts and endpoint names only, never a session id or a token, is bounded to about 180 characters, is built only when a credential is approaching or at the ceiling, and cannot affect the admission decision (a fault building it just leaves the line without the clause).
+
+At the ceiling, a new session is admitted by evicting the credential's longest-idle StreamableHTTP session instead of being refused, provided that session has nothing in flight (no running request and no open standalone GET stream, which is how a live Claude Code process looks) and has been idle for at least the configured floor. Only the credential's own sessions are considered; an SSE stream is never evicted. The eviction keeps the session's `mcp_sessions` row, so a client that comes back with the id lazily recovers it under the same id, exactly as after an idle-sweeper reap; a request that arrives while the evicted session is still being torn down waits for the teardown, for at most 5 seconds, then recovers (past that bound it gets the reinitialize `404` with a WARN, `Lazy recovery: a ceiling eviction teardown has not finished after 5000 ms; ...`, and the client opens a new session), and two requests that arrive together on one id that is not resident (after an eviction, a sweep or a restart) share a single recovery instead of colliding. The admitting request waits for the evicted session to release its backend connections before taking its own, but for at most 5 seconds: past that it is admitted anyway with a warning (`Session ceiling eviction: the evicted session's teardown on <endpoint> has not finished after 5000 ms; ...`) and the teardown finishes in the background, so a slow backend cannot stall a new session. Each eviction logs `Concurrent-session ceiling: evicted idle session on <endpoint> (idle Ns) for <method> credential "<name>" to admit a new session (N/M)` at INFO, followed by the same live clause, and records a throttled `client` event at `info` level; the `/health/sessions` admin body counts them under `ceilingEvictions`. When nothing qualifies, the `429`, its body and the `Concurrent-session ceiling reached ...` WARN are unchanged, so a log rule on that line fires only for a real refusal.
+
+With eviction enabled, every allowed initialize or SSE stream-open reserves its slot before awaiting the pool, including admissions below the ceiling. Registration replaces that reservation synchronously; failures and client disconnections release it, and a late pool result is cleaned up rather than registered. Initial connects are marked in flight before the first await, so a slow connect cannot become an eviction candidate. A failed eviction transport close still releases the pools before its recovery gate opens. Eviction cleanup and recovery-wait logs omit victim ids and exception values.
+
+Lazy recovery takes part in the ceiling under the rule "evict, never refuse" (ruled 2026-10-06). A returning client whose session is not resident (after an eviction, a sweep or a restart) and whose credential is at its ceiling first evicts one of that credential's idle StreamableHTTP sessions, chosen, reserved and awaited exactly as for an `initialize`, with the same `Concurrent-session ceiling: evicted idle session on ...` INFO line and a `client` event that says it admitted a recovered session rather than a new one. When nothing qualifies it is recovered anyway, over the ceiling, and logs one INFO line, `Session recovery over the concurrent-session ceiling for <method> credential "<name>": N/M live sessions and none idle long enough to evict; recovering it anyway, since a reconnect is never refused.`, followed by the live clause; that line matches none of the ceiling patterns above and records no event, because nothing was refused. A recovery is never refused or failed because of the ceiling, so the ceiling bounds the sessions a credential opens, not every resident one: returning clients can hold a credential above it until the idle sweeper reaps sessions or clients close them. Evictions do not bring it back down, since each one frees a slot for exactly one session. Below the ceiling a recovery reserves its slot like an admission but evicts nothing and logs nothing about the ceiling; with `MCP_SESSION_CEILING_EVICT_IDLE` off it has no ceiling interaction at all. Unlike an admission, a recovery keeps its slot when its client disconnects and still registers the session, as recovery always has; releasing the slot early would let that registration exceed the ceiling without first trying to evict. The hold lasts at most the 5-second eviction wait plus the instance build and connect, which do not wait on a backend.
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `MCP_SESSION_CEILING_EVICT_IDLE` | on | Kill switch for eviction at the ceiling. `false`, `0`, `off`, `no`, `disable` or `disabled` (any case) restores the plain refusal; any other non-empty value that is not `true`, `1`, `on`, `yes`, `enable` or `enabled` keeps it ON and logs a warning, so check the spelling when using it to roll back. Takes effect when the gateway restarts with the new value (a compose recreate); a running process keeps the environment it started with. |
+| `MCP_SESSION_CEILING_EVICT_MIN_IDLE_SECONDS` | `120` | How long a session must have been idle before the ceiling may evict it. Accepts a whole non-negative decimal integer with safe millisecond arithmetic. A malformed, negative or unsafe value falls back to the default; a value below `10` (including `0`) is raised to `10`, each with a warning. The floor keeps newly negotiated sessions out of the eviction set while their clients prepare the next call. |
+
+### OAuth and session lifetimes
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `OAUTH_ACCESS_TOKEN_TTL_SECONDS` | `86400` (24h) | MCP OAuth access-token lifetime (was hardcoded 1h upstream). |
+| `OAUTH_REFRESH_TOKEN_TTL_SECONDS` | `31536000` (365d) | MCP OAuth refresh-token lifetime. Refresh tokens rotate on use. |
+| `OAUTH_REFRESH_CLIENT_AUTH` | `log` | Client authentication on the refresh_token grant for a confidential client (`client_secret_post` or `client_secret_basic`; public `none` clients are never affected). `log` checks the secret the way the authorization_code grant does, records the outcome (`verified`, `missing` or `invalid`, never the value) as `client_auth=` on the `[oauth] token issued` line and in the `oauth.token.refresh` audit row, warns on anything but `verified`, and still issues. `enforce` refuses anything but `verified` with 401 `invalid_client` (RFC 6749 section 6) and leaves the refresh token unrotated. Any other value falls back to `log` with a warning; the value in effect is logged at boot. |
+| `BETTER_AUTH_SESSION_EXPIRES_IN_SECONDS` | `2592000` (30d) | Better-auth session lifetime. |
+| `BETTER_AUTH_SESSION_UPDATE_AGE_SECONDS` | `604800` (7d) | Better-auth session refresh age. |
+| `SESSION_LIFETIME` | unset (persistent) | Backend MCP session lifetime; unset = never expire. |
+
+### Connection pool and recovery
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `MAX_TOTAL_CONNECTIONS` | `100` | Global backend-connection cap (soft LRU bound). |
+| `MAX_CONNECTIONS_PER_SERVER` | `5` | Per-backend connection cap. |
+| `MCP_SESSION_TTL_DAYS` | `7` | Age after which persisted `mcp_sessions` rows are pruned. |
+| `MCP_SESSION_PRUNER_INTERVAL_MS` | `86400000` (24h) | Pruner interval. |
+| `MCP_AUTO_NUKE_ON_CAPABILITY_CHANGE` | `true` | Delete capability-stale sessions on first boot after a capability change. |
+| `MCP_ACTIVE_HEALTH_CHECK` | on | Health-check active pooled connections, not just idle ones. |
+| `MCP_ERROR_PROBE_INTERVAL_MS` | `300000` (5m) | Half-open probe interval for error-gated backends. |
+| `MCP_RECONNECT_BACKOFF_INITIAL_MS` / `_MAX_MS` / `_MULTIPLIER` | `1000` / `30000` / `2` | Exponential reconnect backoff schedule (with jitter). |
+| `MCP_RECOVERY_RESET_THRESHOLD_MS` | `300000` (5m) | Recent-success window within which a transport drop resets the circuit breaker. |
+
+### Observability and sweeps
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `LOG_MAX_SIZE_MB` | `50` | In-container log-file rotation threshold. |
+| `TOOL_AUDIT_RETENTION_DAYS` | `90` | `tool_call_audit` retention. `0` or negative keeps rows forever (pruning is skipped entirely). Values `1`-`29` are raised to `30` at boot with a warning, because migration `0032` makes rows undeletable inside a 30-day window. |
+| `TOOL_AUDIT_ARGS_SHAPE` | on | Records `tool_call_audit.args_shape` (migration `0039`): only the top-level argument key names this proxy's own final tools/list inputSchema declares (other keys are counted, never named). Snapshots are isolated per proxy, replaced after listing and invalidated on list_changed; unlisted paths, including the OpenAPI bridge, store counts only. Six allowlisted selector keys store their value only when the schema declares an enum or const and the value is a member (and at most 32 identifier characters); a non-member or an unsupported reference or composition stores `?`, and a selector with no enum or const stores `*` (sent, value not from a closed set, so not recorded). Schemas over 256 properties and listings over 5,000 tools store counts only; selector value collections over 256 entries store a marker. No other argument value is recorded. `off`, `false` or `0` stores NULL instead. Rows are write-once, so a wrong shape cannot be corrected afterwards; this is the kill switch. |
+| `TOOL_AUDIT_INBAND_CLASSIFY` | on | Classifies a tool's in-band refusal as a failure in `tool_call_audit` (`success=false`, `error_code='inband_error'`, the tool's code in `error_detail`). `off`, `false` or `0` disables that step only; `isError`, unknown-tool and retired-name handling keep working. Rows are write-once, so this is the kill switch for a misclassification. |
+| `RETIRED_TOOLS_FILE` | unset | Path of the retired-tool map (JSON). Unset means the redirect is inert and the filesystem is never touched. See [Retired-tool redirect](#retired-tool-redirect). |
+| `RETIRED_TOOLS_RELOAD_SECONDS` | `30` | How often the map file is re-checked, on the failure path only (clamped to 5-3600; an invalid value falls back to 30 with a warning). |
+| `GATEWAY_EVENTS_RETENTION_DAYS` | `90` | `gateway_events` retention. Floor-clamped to 30 with a boot warning: rows are immutable for their first 30 days at the database level, so a lower value cannot take effect. There is no "keep forever" value. Reclaiming in-window space is a deliberate break-glass act, not a config change — see below. |
+| `AUDIT_STORAGE_CHECK_INTERVAL_SWEEPS` | `12` | How many 5-minute cleanup sweeps between audit-table storage checks, so the default is hourly. Values below `1` fall back to the default and anything above `288` (24h) is capped, both with a boot warning: there is deliberately no value that turns the check off. The per-check reading is logged at INFO, so it only reaches stdout (and therefore a log shipper) when `LOG_LEVEL` is `info` or `all`; see the note below. |
+| `AUDIT_STORAGE_WARN_MB` | `2048` | Per-table size at which the storage check escalates from an INFO line to a WARN plus a `system` event in the gateway history. At most one warning per table per 24h while the condition lasts; a table falling below 90% of the threshold re-arms it. Capped at `1048576` (1 TiB) with a boot warning, so a threshold nothing can reach cannot be used as an off switch. |
+| `TOOLS_SWEEP_INTERVAL_SECONDS` | `60` | Periodic tool-definition drift sweep (`0` disables). |
+| `PUBLIC_SESSION_TTL_SECONDS` | `86400` (24h) | Idle-time TTL for public StreamableHTTP sessions before reap. |
+| `SESSION_SWEEP_INTERVAL_SECONDS` | `300` | Public-session sweeper interval (`0` disables). |
+
+#### Audit outcome classes
+
+`tool_call_audit.success` and `error_code` describe the outcome of a proxied `tools/call`. The classifier only reads the result; it never changes what the client receives (the middleware returns the same object).
+
+| `error_code` | Meaning |
+|---|---|
+| `NULL` (`success=true`) | The call returned a result with no failure signal. |
+| `tool_error` | The result has `isError: true`. `error_detail` carries the tool's code token when the body is an envelope, or `validation` for an argument-validation refusal. |
+| `inband_error` | `isError` is unset but the top level of the result's envelope reports a refusal: `error` is `true`, a non-blank string or a non-empty object, or `status` is `failed` or `partial`, or `partial` is `true`. `error_detail` is the tool's code token (a lowercase snake_case code under 48 characters with no id in it), or a fixed marker (`status_failed`, `partial`), or NULL. |
+| `unknown_tool` | The call named a tool nobody serves: the gateway's own `Unknown tool` error, a backend's not-found answer, or the filter's unresolved-server denial. |
+| `tool_retired` | The retired-tool redirect answered (see [Retired-tool redirect](#retired-tool-redirect)). |
+| anything else | A thrown protocol error: its numeric code (for example `-32001` for a timeout) or its class name. |
+
+The in-band rule inspects the TOP LEVEL only. `error` absent, `null`, `false`, an empty string, a number or an empty collection is a success (a tool may return `error: null` on every success). Nested keys are never read, so a section that degraded inside a good result, a write's failed read-back object and per-item failures inside a list do not mark the call failed. A refusal carried only by `ok: false`, `warning` or `note` is a known false negative.
+
+`success` changed meaning at the deploy that introduced `inband_error`: earlier rows recorded such refusals as `success=true` and cannot be reclassified (rows are write-once). Compare failure rates across that date with care.
+
+The Live Logs line for an in-band refusal is `<tool> refused in-band: <detail> (<ms>ms)` at level `warn`, deliberately worded without the words that log-based error panels count.
+
+#### Retired-tool redirect
+
+A client that cached an old tool list, or an automation node that still names a removed tool, calls a name nobody serves and gets a bare `Unknown tool`. When `RETIRED_TOOLS_FILE` points at a map file, the gateway answers such a call with what replaced the tool instead:
+
+```json
+{ "error": true, "code": "tool_retired",
+  "message": "<server>__<tool> was retired on 2026-09-02 and is no longer served. Use <server>__<replacement>(mode=\"x\"). Refresh your tool list (tools/list) if your client cached an older one.",
+  "context": { "retired": "...", "since": "...", "replacement": "...", "replacement_call": "...", "also": [], "skill": "...", "hint": "..." } }
+```
+
+It is returned as an `isError` result with no `structuredContent` (a client validating that against a cached output schema would otherwise turn the message into a validation failure). Over the OpenAPI bridge it surfaces as the bridge's usual `403` body. One status change to know about: a name in the map that the bridge handler itself throws as `Unknown tool` (no server with that prefix any more) used to answer `404 "Tool not found"` and now answers this `403` redirect, because the redirect is an `isError` result. A name outside the map keeps the `404`, and a backend's own not-found answer was already a `403`.
+
+Properties that make it safe to run in front of live automation:
+
+- **Failure-gated.** The map is consulted only AFTER a call has already failed as an unknown tool: the gateway's own `Unknown tool` throw, a backend's not-found answer for a name the gateway still routes to it, or the filter's fail-closed denial for a server prefix that no longer resolves. A call that succeeds, and every other failure (timeouts, broker errors, validation refusals), passes through untouched with zero lookups. A map entry therefore cannot shadow a live tool; a wrong or stale entry degrades to the old bare error.
+- **Executes nothing.** The redirect forwards nothing and is not an alias: the old name still does not answer.
+- **Data only, fail open.** The file never influences routing or access. A missing, unreadable or invalid file keeps the last good map (or none) and logs one warning per five minutes. An entry that fails validation is dropped alone with a warning naming it; a wrong version, a non-object root, a file over 262144 bytes or more than 500 entries rejects the file.
+- **Recorded.** The audit row is `error_code='tool_retired'` (`success=false`), so retired-name traffic by consumer is one SQL query even when the caller swallows the failure.
+
+File format (version 1): `{"version": 1, "retired": {"<server>__<tool>": {"since": "YYYY-MM-DD", "replacement": "<server>__<tool>" | null, "args": {"mode": "..."}, "call": "...", "also": ["<server>__<tool>"], "skill": "...", "hint": "..."}}}`. `since` is required and must be a real, non-future date; at least one of `replacement`, `also`, `skill` or `hint` is required. Limits: `args` up to 4 keys (`[a-z_]{1,24}` to `[A-Za-z0-9_|.-]{1,80}`), `call` 160 characters, `also` 4 names, `skill` 80, `hint` 280, no control characters. Mount the file's DIRECTORY read-only rather than the file itself: replacing a checked-out file replaces its inode, and a single-file bind mount would keep serving the old content.
+
+#### Timeout adjudication hint
+
+When a `tools/call` times out (`-32001`), the client now receives the same error with added text: the outcome is unknown (the tool may have applied the change, partly applied it, or still be finishing), and for a tool that changes anything the caller should read the target's current state before retrying. The text names no actor and no duration, because a backend can raise the same `-32001` with the same data shape (Sol review, 2026-10-02). The MCP SDK client does send `notifications/cancelled` on a timeout and a Python SDK backend acts on it, but whether the cancel landed before, during or after the work cannot be known at the gateway, so the text claims neither "cancelled" nor "not cancelled" (an earlier wording said the call was not cancelled, which was false). Errors with either SDK timeout message and its numeric `data.timeout` or `data.maxTotalTimeout` shape are annotated, including backend-raised errors with that shape; an unknown-session `-32001` remains unchanged. The call is still never re-sent by the gateway.
+
+**Break-glass on `gateway_events` and `tool_call_audit`.** Both carry the same 30-day window (migrations `0031` and `0032`), so the same rules apply to each. Nothing in the application can delete a row inside that window, and that includes the retention sweepers: a `DELETE` that touches even one in-window row raises, and the raise rolls back the entire statement, so a mixed-range prune reclaims nothing rather than partially succeeding. That rollback is why both retention variables are floor-clamped rather than trusted: an under-range setting would stop pruning altogether instead of shortening it. Reclaiming space early therefore requires a superuser at the database — `ALTER TABLE <table> DISABLE TRIGGER <table>_no_recent_delete`, or `SET session_replication_role = 'replica'` for the session — and re-enabling afterwards. Treat that as an audit-worthy act: it is the one operation that can remove evidence these tables exist to preserve, it leaves no trace in the table itself, and the ordinary answer to a full disk is to lower the retention variable toward its floor and wait for the window to pass.
+
+**Audit storage tripwire.** Because that answer takes up to 30 days to have any effect, the useful defence against unbounded growth is noticing early rather than reacting late. The cleanup sweep therefore measures all three audit tables every `AUDIT_STORAGE_CHECK_INTERVAL_SWEEPS` ticks (hourly by default) and logs one line per table:
+
+```
+[audit-storage] table=gateway_events est_rows=1284310 total_bytes=612368384 total_mb=584.0 threshold_mb=2048
+```
+
+The figures come from `pg_class.reltuples` and `pg_total_relation_size`, never from `count(*)`: a count would be a sequential scan of exactly the table that got too big, so the monitor's cost would grow with the problem it is watching for. `est_rows` reads `unknown` until a table has been analyzed, which is honest rather than a zero. When a table reaches `AUDIT_STORAGE_WARN_MB` the same line escalates to a WARN and a `system` event is written to `gateway_events`, so the warning shows up in the Live Logs **History** view alongside everything else the operator already reads, not only in whatever collects container logs. That warning repeats at most once per table per 24 hours, and a table that falls back below 90% of the threshold re-arms for an immediate warning on its next crossing. There is no write-side rate limit on these tables by design: capping the writes would mean choosing at write time which security records to drop, and a dropped record is unrecoverable in exactly the tables that exist to be complete.
+
+**Set `LOG_LEVEL=info` if you want the per-check reading in your log stack.** The hourly line is logged at INFO, and the console mirror only carries INFO when `LOG_LEVEL` is `info` or `all`; the default when `LOG_LEVEL` is unset is `errors-only`, whose floor is WARN. On a default-configured deployment the reading therefore lands in the in-container application log but never on stdout, so nothing shipping container logs will see it. The threshold warning is a WARN and clears that floor at every setting except `none`, and its `gateway_events` row is written regardless of `LOG_LEVEL` at all: the escalation is deliberately not dependent on logging configuration, which is why it is the layer that carries the signal that must not be missed.
+
+## Concepts
+
+The core model is unchanged from upstream.
+
+- **MCP Server** — a configuration telling MetaMCP how to start or connect to an MCP server (STDIO via `uvx`/`npx`, or remote SSE/StreamableHTTP). STDIO servers support raw env values, `${ENV_VAR}` references resolved from the container, and auto-matching of same-named env vars.
+- **Namespace** — a group of MCP servers. Enable/disable servers or individual tools, apply middleware, and override tool names/titles/descriptions or attach annotations per namespace.
+- **Endpoint** — a public surface bound to a namespace, hosted over **SSE**, **Streamable HTTP**, or **OpenAPI**, with **API-key** or **OAuth** auth. Multiple servers in the namespace are aggregated into one endpoint.
+- **Middleware** — intercepts and transforms MCP requests/responses at the namespace level (e.g. "filter inactive tools"). This fork adds a tool-call **auditing** middleware.
+- **Inspector** — the MCP inspector with saved server configs, for debugging your endpoints in place.
+
+## Connect a client
+
+Endpoints are remote (SSE / Streamable HTTP / OpenAPI). Example Cursor `mcp.json`:
 
 ```json
 {
@@ -227,15 +460,7 @@ Example `mcp.json`
 }
 ```
 
-### 🖥️ Connecting Claude Desktop and Other STDIO-only Clients
-
-Since MetaMCP endpoints are remote only (SSE, Streamable HTTP, OpenAPI), clients that only support stdio servers (like Claude Desktop) need a local proxy to connect.
-
-**Note:** While `mcp-remote` is sometimes suggested for this purpose, it's designed for OAuth-based authentication and doesn't work with MetaMCP's API key authentication. Based on testing, `mcp-proxy` is the recommended solution.
-
-Here's a working configuration for Claude Desktop using `mcp-proxy`:
-
-Using Streamable HTTP
+STDIO-only clients (e.g. Claude Desktop) need a local proxy. `mcp-proxy` works with MetaMCP's API-key auth (`mcp-remote` does not):
 
 ```json
 {
@@ -244,258 +469,127 @@ Using Streamable HTTP
       "command": "uvx",
       "args": [
         "mcp-proxy",
-        "--transport",
-        "streamablehttp",
+        "--transport", "streamablehttp",
         "http://localhost:12008/metamcp/<YOUR_ENDPOINT_NAME>/mcp"
       ],
-      "env": {
-        "API_ACCESS_TOKEN": "<YOUR_API_KEY_HERE>"
-      }
+      "env": { "API_ACCESS_TOKEN": "<YOUR_API_KEY>" }
     }
   }
 }
 ```
 
-Using SSE
+Notes: use the API key in an `Authorization: Bearer <API_KEY>` header (the `?api_key=` query param works for Streamable HTTP and OpenAPI, not SSE). Replace `<YOUR_ENDPOINT_NAME>` and the key (format `sk_mt_...`).
 
-```json
-{
-  "mcpServers": {
-    "ehn": {
-      "command": "uvx",
-      "args": [
-        "mcp-proxy",
-        "http://localhost:12008/metamcp/<YOUR_ENDPOINT_NAME>/sse"
-      ],
-      "env": {
-        "API_ACCESS_TOKEN": "<YOUR_API_KEY_HERE>"
-      }
-    }
-  }
-}
-```
+## Authentication
 
-**Important notes:**
-- Replace `<YOUR_ENDPOINT_NAME>` with your actual endpoint name
-- Replace `<YOUR_API_KEY_HERE>` with your MetaMCP API key (format: `sk_mt_...`)
+- **Better Auth** for frontend and backend (tRPC), with session cookies enforcing secure internal proxy connections.
+- **API-key auth** for external access via `Authorization: Bearer <api-key>`.
+- **MCP OAuth** on exposed endpoints (MCP Spec 2025-06-18), with this fork's refresh-token grant and configurable TTLs.
+- **RBAC** — `admin` vs `member` roles; destructive and config mutations are admin-gated (see [What we added](#what-we-added-over-upstream)).
+- **OIDC / SSO** — Auth0, Keycloak, Azure AD, Google, Okta, etc., with PKCE and separate UI/SSO registration controls. See [`CONTRIBUTING.md`](CONTRIBUTING.md#openid-connect-oidc-provider-setup).
 
-For more details and alternative approaches, see [issue #76](https://github.com/metatool-ai/metamcp/issues/76#issuecomment-3046707532).
+### Access groups
 
-### 🔧 API Key Auth Troubleshooting
+By default an OAuth-authenticated user reaches every public endpoint on the gateway: endpoint access is gated on ownership only, so a public endpoint admits anyone who has completed an authorization flow. On an estate that publishes one connector per business system, that means one login reaches all of them.
 
-- `?api_key=` param api key auth doesn't work for SSE. It only works for Streamable HTTP and OpenAPI.
-- Best practice is to use the API key in `Authorization: Bearer <API_KEY>` header.
-- Try disable auth temporarily when you face connection issues to see if it is an auth issue.
+Access groups narrow it. A group is a named, reusable set of people; endpoints are mapped to groups; and an individual endpoint opts in with a **Restrict to access groups** switch. Once an endpoint is restricted, an OAuth caller reaches it only if they are an administrator or belong to at least one group mapped to it. Anyone else gets `403` with a single fixed message that names no endpoint and no group.
 
-## ❄️ Cold Start Problem and Custom Dockerfile
+The switch governs OAuth callers and nothing else, so what it actually does depends on the endpoint's other auth toggles, and the admin UI labels all three cases rather than reporting a bare "restricted":
 
-- MetaMCP pre-allocate idle sessions for each configured MCP servers and MetaMCPs. The default idle session for each is 1 and that can help reduce cold start time.
-- If your MCP requires dependencies other than `uvx` or `npx`, you need to customize the Dockerfile to install dependencies on your own.
-- Check [invalidation.md](invalidation.md) for a seq diagram about how idle session invalidates during updates.
+| endpoint accepts | effect of the switch |
+| --- | --- |
+| OAuth only | the gate governs every caller |
+| OAuth and API keys | it narrows OAuth callers; every API-key holder still reaches the endpoint |
+| API keys only | no effect at all, since no caller arrives through the gate |
 
-🛠️ **Solution**: Customize the Dockerfile to add dependencies or pre-install packages to reduce cold start time.
+Administered from **Access Groups** in the sidebar (administrators only), plus an **Access** panel on each endpoint's edit dialog showing the switch and the groups currently mapped to it. Group create/update/delete, membership changes, endpoint mappings and the restriction switch each write an `audit_log` row; so does a refused request.
 
-## 🧾 Log Levels
+Three properties worth stating plainly, because each is a deliberate boundary rather than an omission:
 
-MetaMCP’s backend writes logs to files and optionally mirrors selected levels to the console. Control console mirroring with the `LOG_LEVEL` environment variable.
+- **It ships inert.** No group exists and no endpoint is restricted until an administrator creates and switches them on, so upgrading changes nothing for any existing caller. On an unrestricted endpoint the gate costs one boolean read and no query.
+- **API keys are not affected.** A key is minted by an administrator, is held by a machine rather than a person, and already carries its own per-endpoint scoping (`endpoint_uuid` and the per-endpoint *require scoped API key* switch). Gating a server-to-server key on the group membership of whoever happens to own it would break integrations to solve a problem those keys do not have. Use key scoping for machine callers and access groups for people.
+- **Groups gate whole endpoints, not individual tools.** There is no per-tool grant, and adding one is not planned. The supported way to give an audience a narrower tool set is the one this platform already has: curate a second namespace containing only the tools they should see, publish a second endpoint over it, and map the group to that endpoint.
 
-- Files
-  - `app.log`: receives `DEBUG`, `INFO`, and `WARN`
-  - `error.log`: receives `ERROR`
+Membership decisions are cached in-process for 60 seconds and dropped immediately when any group or endpoint mapping changes, so a revocation takes effect on the caller's next request. Across multiple backend replicas the cache is per-process, and 60 seconds is the worst-case convergence.
 
-- Console mirroring (`LOG_LEVEL`)
-  - `all`: mirror `DEBUG`, `INFO`, `WARN`, `ERROR` to console
-  - `info`: mirror only `INFO` to console
-  - `errors-only`: mirror `WARN` and `ERROR` to console
-  - `none`: no console output
+One limit worth knowing: the gate runs per request, so restricting an endpoint does not disconnect a notification stream that is already open. No tool call can land through it, because every call is a fresh request that re-runs the gate, but `list_changed` and log notifications keep flowing on that connection until the client disconnects.
 
-- Defaults and examples
-  - Default (when unset or invalid): `errors-only`
-  - `.env` example:
-    ```bash
-    LOG_LEVEL='errors-only' # 'all', 'info', 'errors-only', 'none'
-    ```
-  - `docker-compose.dev.yml` uses: `LOG_LEVEL: ${LOG_LEVEL:-all}`
+### API-key IP allowlists
 
-## 🔐 Authentication
+An API key normally works from any address, so a key that leaks works for whoever holds it. An IP allowlist binds a key to the networks its real caller uses. It applies to API keys only: OAuth sign-ins (MCP connectors, browser and SSO sessions) are never evaluated against it.
 
-- 🛡️ **Better Auth** for frontend & backend (TRPC procedures)
-- 🍪 **Session cookies** enforce secure internal MCP proxy connections
-- 🔑 **API key authentication** for external access via `Authorization: Bearer <api-key>` header
-- 🪪 **MCP OAuth**: Exposed endpoints have options to use standard OAuth in MCP Spec 2025-06-18, easy to connect.
-- 🏢 **Multi-tenancy**: Designed for organizations to deploy on their own machines. Supports both private and public access scopes. Users can create MCPs, namespaces, endpoints, and API keys for themselves or for everyone. Public API keys cannot access private MetaMCPs.
-- ⚙️ **Separate Registration Controls**: Administrators can independently control UI registration and SSO/OAuth registration through the settings page, allowing for flexible enterprise deployment scenarios.
+Each key either has its own list (`api_keys.allowed_cidrs`) with its own mode, or has none and follows the **global** list and mode. A mode is one of:
 
-## 🚦 Traffic Management
+| mode | effect on a request from an address outside the list |
+| --- | --- |
+| `off` (default) | nothing is checked |
+| `audit` | the request is served and a throttled `apikey.ip.would_deny` audit row is written |
+| `enforce` | the request is refused with `403` and the same generic message other credential refusals use, and a throttled `apikey.ip.denied` audit row is written |
 
-### 🚧 MCP Rate Limit
-The MCP Rate Limit feature allows you to set the maximum requests a MCP tool (a endpoint) will accept in a given time window. There are two different strategies to set limits that you can use separately or together:
+Both rows carry `detail.reason = "api_key_ip_not_allowed"`, the surface (`data_plane`, `oauth_introspect` or `admin_plane`), the policy source (`key` or `global`) and why the address failed (`not_in_list`, `missing`, `unparsable`). Rows are throttled to one per key and address per ten minutes, plus a per-key budget per window, with the suppressed counts carried on the next row, so a refused caller cannot flood the append-only audit table.
 
- * `Endpoint rate-limiting (Rate Limiting)`: applies simultaneously to all clients using the endpoint, sharing a unique counter.
- * `User rate-limiting (Client Rate Limiting)`: sets a counter to each individual user.
+Where it is checked: inside both key validators, so it covers the data plane (`/metamcp/*`, both API-key branches), `POST /oauth/introspect` and the admin-plane bearer on `/trpc`. The admin UI's `apiKeys.validate` helper deliberately does not check it. The client address is `CF-Connecting-IP` (see the trust note in `middleware/audit-context.middleware.ts`); `X-Forwarded-For` and the socket address are never used. Under `enforce`, a request with no readable address is refused.
 
-Both types can coexist and they complement each other, and store the counters in-memory. On a cluster, each machine sees and counts only its passing traffic.
+The one exemption is explicit: a list holding both `0.0.0.0/0` and `::/0` admits any address and also a request with no address, for callers with no stable address such as CI runners.
 
-### **Endpoint rate-limiting**
-The endpoint rate limit acts on the number of simultaneous transactions an endpoint can process. This type of limit protects the service for all customers.
-When the users connected to an endpoint together exceed the `rate-limiting`, MetaMCP starts to reject connections with a status code `503 Service Unavailable`.
+On the data plane, an IP refusal is evaluated before the plane, account and endpoint-scope checks, so a holder from the wrong address learns nothing about the key; on `/trpc` the check runs after the plane check, so a data-plane key presented there gets the usual 401. An IP refusal is not counted by the failed-credential rate limiter, because the credential itself is valid.
 
-#### **Endpoint rate-limiting options**
- * `Max Rate`: Defines how many requests will you accept from all users together at any given instant. When the gateway starts, the bucket is full. As requests from users come, the remaining tokens in the bucket decrease. At the same time, the rate-limiting refills the bucket at the desired rate until its maximum capacity is reached.
- * `Max Rate Seconds`: Time period in which the maximum rates operate in seconds. For instance, if you set an max rate seconds of 60s and a rate-limiting of 5, you are allowing 5 requests every sixty seconds.
+It ships inert: every existing key follows the global policy, whose mode is unset (`off`). Administrators manage policies on the **API Keys** page (an **IP policy** column and editor in the admin table, and a **Global IP policy** panel above it) or through the admin-only tRPC procedures `apiKeys.setIpPolicy`, `apiKeys.getGlobalIpPolicy` and `apiKeys.setGlobalIpPolicy`; each write emits an `apikey.ip_policy.set` or `config.api_key_ip_policy.set` audit row with the old and new value. `apiKeys.listAll` shows each key's list, mode and `last_used_ip` (the address of its last request, updated with `last_used_at`). The server refuses `enforce` with an empty list, a per-key mode without a per-key list, and any entry that is not a valid CIDR (including one with host bits set). `API_KEY_IP_POLICY_DISABLED=true` turns all IP evaluation off process-wide (see `example.env`).
 
-### **User rate-limiting**
-The client or user rate limit applies one counter to each individual user and endpoint. When a single user connected to an endpoint exceeds their `client-max-rate`, MetaMCP starts rejecting connections with a status code `429 Too Many Requests`
+For reverse-proxy (nginx) setups with SSE long connections, see [`nginx.conf.example`](nginx.conf.example). A 2–4GB instance is the practical minimum for a hosted deployment.
 
-#### **User rate-limiting options**
- * `Client Max Rate`: Number of tokens you add to the Token Bucket for each individual user (user quota) in the time interval you want (Client Max Rate Seconds). The remaining tokens in the bucket are the requests a specific user can do.
- * `Client Max Rate Seconds`: Time period in which the maximum rates operate in seconds. For instance, if you set an every of 60s and a rate of 5, you are allowing 5 requests every sixty seconds.
- * `Client Max Rate Strategy`: Sets the strategy you will use to set client counters. Choose ip when the restrictions apply to the client’s IP address, or set it to header when there is a header that identifies a user uniquely. That header must be defined with the key entry.
- * `Client Max Rate Strategy Key`: It is the header name containing the user identification (e.g., Authorization on tokens, or X-Original-Forwarded-For for IPs).
-
-## 🔗 OpenID Connect (OIDC) Provider Support
-
-MetaMCP supports **OpenID Connect authentication** for enterprise SSO integration. This allows organizations to use their existing identity providers (Auth0, Keycloak, Azure AD, etc.) for authentication.
-
-### 🛠️ **Configuration**
-
-Add the following environment variables to your `.env` file:
-
-```bash
-# Required
-OIDC_CLIENT_ID=your-oidc-client-id
-OIDC_CLIENT_SECRET=your-oidc-client-secret
-OIDC_DISCOVERY_URL=https://your-provider.com/.well-known/openid-configuration
-
-# Optional customization
-OIDC_PROVIDER_ID=oidc
-OIDC_SCOPES=openid email profile
-OIDC_PKCE=true
-```
-
-### 🏢 **Supported Providers**
-
-MetaMCP has been tested with popular OIDC providers:
-
-- **Auth0**: `https://your-domain.auth0.com/.well-known/openid-configuration`
-- **Keycloak**: `https://your-keycloak.com/realms/your-realm/.well-known/openid-configuration`
-- **Azure AD**: `https://login.microsoftonline.com/your-tenant-id/v2.0/.well-known/openid-configuration`
-- **Google**: `https://accounts.google.com/.well-known/openid-configuration`
-- **Okta**: `https://your-domain.okta.com/.well-known/openid-configuration`
-
-### 🔒 **Security Features**
-
-- 🔐 **PKCE (Proof Key for Code Exchange)** enabled by default
-- 🛡️ **Authorization Code Flow** with automatic user creation
-- 🔄 **Auto-discovery** of OIDC endpoints
-- 🍪 **Seamless session management** with existing auth system
-
-### 📱 **Usage**
-
-Once configured, users will see a **"Sign in with OIDC"** button on the login page alongside the email/password form. The authentication flow automatically creates new users on first login.
-
-For more detailed configuration examples and troubleshooting, see **[CONTRIBUTING.md](CONTRIBUTING.md#openid-connect-oidc-provider-setup)**.
-
-## ⚙️ Registration Controls
-
-MetaMCP provides **separate controls** for different registration methods, allowing administrators to fine-tune user access policies for enterprise deployments.
-
-### 🎛️ **Available Controls**
-
-- **UI Registration**: Controls whether users can create accounts via the registration form
-- **SSO Registration**: Controls whether users can create accounts via SSO/OAuth providers (OIDC, etc.)
-
-### 🏢 **Enterprise Use Cases**
-
-This separation enables common enterprise scenarios:
-
-- **Block UI registration, allow SSO**: Prevent manual signups while allowing corporate SSO users
-- **Block SSO registration, allow UI**: Allow manual signups while restricting SSO access
-- **Block both**: Completely disable new user registration
-- **Allow both**: Default behavior for open deployments
-
-### 🛠️ **Configuration**
-
-Access the **Settings** page in the MetaMCP admin interface to configure these controls:
-
-1. Navigate to **Settings** → **Authentication Settings**
-2. Toggle **"Disable UI Registration"** to control form-based signups
-3. Toggle **"Disable SSO Registration"** to control OAuth/OIDC signups
-
-Both controls work independently, giving you full flexibility over your registration policy.
-
-## 🌐 Custom Deployment and SSE conf for Nginx
-
-If you want to deploy it to a online service or a VPS, a instance of at least 2GB-4GB of memory is required. And the larger size, the better performance.
-
-Since MCP leverages SSE for long connection, if you are using reverse proxy like nginx, please refer to an example setup [nginx.conf.example](nginx.conf.example)
-
-## 🏗️ Architecture
+## Architecture
 
 - **Frontend**: Next.js
-- **Backend**: Express.js with tRPC, hosting MCPs through TS SDK and internal proxy
+- **Backend**: Express.js + tRPC, hosting MCPs through the TS SDK and an internal proxy
 - **Auth**: Better Auth
-- **Structure**: Standalone monorepo with Turborepo and Docker publishing
-
-### 📊 Sequence Diagram
-
-*Note: Prompts and resources follow similar patterns to tools.*
+- **Structure**: Turborepo monorepo (`apps/backend`, `apps/frontend`, `packages/zod-types`), Drizzle migrations, Docker publishing
+- **Stack notes for this fork**: zod v4, `@modelcontextprotocol/sdk` 1.29
 
 ```mermaid
 sequenceDiagram
-    participant MCPClient as MCP Client (e.g., Claude Desktop)
-    participant MetaMCP as MetaMCP Server
-    participant MCPServers as Installed MCP Servers
+    participant MCPClient as MCP Client
+    participant MetaMCP as MetaMCP Gateway
+    participant MCPServers as Backend MCP Servers
 
     MCPClient ->> MetaMCP: Request list tools
-
-    loop For each listed MCP Server
-        MetaMCP ->> MCPServers: Request list_tools
-        MCPServers ->> MetaMCP: Return list of tools
+    loop For each backend
+        MetaMCP ->> MCPServers: list_tools
+        MCPServers ->> MetaMCP: tools
     end
-
-    MetaMCP ->> MetaMCP: Aggregate tool lists & apply middleware
-    MetaMCP ->> MCPClient: Return aggregated list of tools
-
+    MetaMCP ->> MetaMCP: Aggregate + apply middleware
+    MetaMCP ->> MCPClient: Aggregated tools
     MCPClient ->> MetaMCP: Call tool
-    MetaMCP ->> MCPServers: call_tool to target MCP Server
-    MCPServers ->> MetaMCP: Return tool response
-    MetaMCP ->> MCPClient: Return tool response
+    MetaMCP ->> MCPServers: call_tool (with recovery + audit)
+    MCPServers ->> MetaMCP: Response
+    MetaMCP ->> MCPClient: Response
 ```
 
-## 🗺️ Roadmap
+## Contributing and upstreaming
 
-**Potential next steps:**
+Contributions welcome. Bugs and feature requests go to [GitHub Issues](https://github.com/Umbrella-IT-Group/metamcp/issues), questions to [Discussions](https://github.com/Umbrella-IT-Group/metamcp/discussions), and security reports through [`SECURITY.md`](SECURITY.md). [`CONTRIBUTING.md`](CONTRIBUTING.md) covers the development setup and the pull request flow: PRs target `umbrella` and are squash-merged after review and gates.
 
-- [ ] 🔌 Headless Admin API access
-- [ ] 🔍 Dynamically apply search rules on MetaMCP endpoints
-- [ ] 🛠️ More middlewares
-- [ ] 💬 Chat/Agent Playground
-- [ ] 🧪 Testing & Evaluation for MCP tool selection optimization
-- [ ] ⚡ Dynamically generate MCP servers
+When a patch is generic (a bug fix or config option that isn't Umbrella-specific), branch off `main`, open it against `metatool-ai/metamcp`, and once merged upstream we drop our private carry. [`UMBRELLA_FORK.md`](UMBRELLA_FORK.md) tracks the full cherry-pick log, which of our patches converged upstream, and the upstreaming backlog.
 
-## 🌐 i18n
+## License
 
-See [README-i18n.md](README-i18n.md)
+**MIT.** The [`LICENSE`](LICENSE) file is unchanged from upstream:
 
-Currently en and zh locale are supported, but welcome contributions.
+> Copyright 2024 MetaMCP, James Zhang
 
-## 🤝 Contributing
+Our fork-specific changes are marked in commit messages and in [`UMBRELLA_FORK.md`](UMBRELLA_FORK.md). If your project uses this code, a back-link is appreciated.
 
-We welcome contributions! See details at **[CONTRIBUTING.md](CONTRIBUTING.md)**
+## Credits
 
-## 📄 License
+- **[`metatool-ai/metamcp`](https://github.com/metatool-ai/metamcp)** by James Zhang — the upstream project this fork is built on.
+- The MetaMCP community, whose PRs this line carries and reconciles.
+- Ideas from [MCP Inspector](https://github.com/modelcontextprotocol/inspector), [MCP Proxy Server](https://github.com/adamwattis/mcp-proxy-server), [open-webui/openapi-servers](https://github.com/open-webui/openapi-servers), and [open-webui/mcpo](https://github.com/open-webui/mcpo).
 
-**MIT**
+## philkrpp fork notes
 
-Would appreciate if you mentioned with back links if your projects use the code.
-
-## 🙏 Credits
-
-Some code inspired by:
-- [MCP Inspector](https://github.com/modelcontextprotocol/inspector)
-- [MCP Proxy Server](https://github.com/adamwattis/mcp-proxy-server)
-
-Not directly used the code by took ideas from
-- https://github.com/open-webui/openapi-servers
-- https://github.com/open-webui/mcpo
+This repository tracks `Umbrella-IT-Group/metamcp` (branch `umbrella`) as its upstream and adds a few
+fork-only features: per-server client header forwarding (`forward_headers`), server-side OAuth token
+exchange with `expected_state` CSRF protection, MetaMCP admin tools behind an endpoint toggle,
+Portuguese and Spanish locales, Kubernetes manifests under `deploy/`, and a configurable
+`CLIENT_IP_SOURCE` for rate limiters. See [UMBRELLA_SYNC.md](./UMBRELLA_SYNC.md) for how to pull new
+upstream commits.

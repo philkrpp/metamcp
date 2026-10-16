@@ -16,12 +16,16 @@ import { createServer } from "./metamcp-proxy";
 export interface AdminToolsOptions {
   enabled: boolean;
   userId: string;
+  isAdmin: boolean;
 }
 
 export interface MetaMcpServerInstance {
   server: Server;
   cleanup: () => Promise<void>;
-  internalSessionId: string;
+  // The proxy's handler context. The router stamps `clientName` onto it after
+  // acquiring the instance so the audit middleware can attribute tool calls to
+  // the calling consumer (see metamcp-proxy.createServer return).
+  handlerContext: MetaMCPHandlerContext;
 }
 
 export interface MetaMcpServerPoolStatus {
@@ -50,8 +54,18 @@ export class MetaMcpServerPool {
   // Track ongoing idle server creation to prevent duplicates
   private creatingIdleServers: Set<string> = new Set();
 
-  // TTL cache: namespaceUuid -> { needsFresh: boolean, expiresAt: number }
-  // Avoids a redundant getMcpServers() DB query on every getServer() call.
+  // Generation counter per namespace UUID: bumped by invalidateIdleServer /
+  // cleanupIdleServer / cleanupAll so an in-flight idle creation that
+  // straddles an invalidation discards its (pre-change-config) result
+  // instead of storing it. Same pattern as mcp-server-pool.ts's
+  // idleSessionGenerations.
+  private idleServerGenerations: Record<string, number> = {};
+
+  // TTL cache: namespaceUuid -> { needsFresh, expiresAt }. True when any
+  // server in the namespace has `forward_headers`: such a namespace never
+  // uses idle instances (they are built without client headers) and every
+  // session gets its own instance carrying its own client's headers. Cached
+  // to avoid a getMcpServers() DB query on every getServer() call.
   private needsFreshServerCache: Record<
     string,
     { needsFresh: boolean; expiresAt: number }
@@ -87,73 +101,53 @@ export class MetaMcpServerPool {
     includeInactiveServers: boolean = false,
     clientRequestHeaders?: Record<string, string>,
     adminTools?: AdminToolsOptions,
-    requestContext?: Pick<MetaMCPHandlerContext, "endpointName" | "auth">,
   ): Promise<MetaMcpServerInstance | undefined> {
     // Check if we already have an active server for this sessionId
     if (this.activeServers[sessionId]) {
       return this.activeServers[sessionId];
     }
 
-    // Only reuse idle servers when the namespace has no servers requiring
-    // per-client header forwarding. Idle servers are created without
-    // clientRequestHeaders, so they can't forward per-user credentials.
-    // We check the actual server configs rather than just the presence of
-    // clientRequestHeaders (which is always truthy from the routers).
-    // The result is cached with a 60-second TTL to avoid a DB roundtrip
-    // on every new session.
-    let needsFreshServer = false;
-    if (clientRequestHeaders) {
-      const cached = this.needsFreshServerCache[namespaceUuid];
-      if (cached && Date.now() < cached.expiresAt) {
-        needsFreshServer = cached.needsFresh;
-      } else {
-        const serverParams = await getMcpServers(
+    // Namespaces with a `forward_headers` server never use idle instances:
+    // those are built without client headers, so they cannot forward this
+    // client's headers, and an instance built WITH them must stay bound to
+    // this session.
+    const needsFreshServer = clientRequestHeaders
+      ? await this.namespaceNeedsFreshServer(
           namespaceUuid,
           includeInactiveServers,
-        );
-        needsFreshServer = anyServerRequiresForwardedHeaders(serverParams);
-        this.needsFreshServerCache[namespaceUuid] = {
-          needsFresh: needsFreshServer,
-          expiresAt: Date.now() + 60_000, // 60s TTL
-        };
-      }
+        )
+      : false;
+
+    // Check if we have an idle server for this namespace that we can convert
+    const idleServer = needsFreshServer
+      ? undefined
+      : this.idleServers[namespaceUuid];
+    if (idleServer) {
+      // Convert idle server to active server
+      delete this.idleServers[namespaceUuid];
+      this.activeServers[sessionId] = idleServer;
+      this.sessionToNamespace[sessionId] = namespaceUuid;
+      this.sessionTimestamps[sessionId] = Date.now();
+
+      this.applyAdminToolsContext(idleServer, adminTools);
+
+      logger.info(
+        `Converted idle MetaMCP server to active for namespace ${namespaceUuid}, session ${sessionId}`,
+      );
+
+      // Create a new idle server to replace the one we just used (ASYNC - NON-BLOCKING)
+      this.createIdleServerAsync(namespaceUuid, includeInactiveServers);
+
+      return idleServer;
     }
 
-    // Audited requests need a fresh server too: idle servers are built without
-    // request auth context, so the handler context would be scoped to the wrong
-    // (or no) endpoint session. Force a fresh build when requestContext is set.
-    if (requestContext) {
-      needsFreshServer = true;
-    }
-
-    if (!needsFreshServer) {
-      const idleServer = this.idleServers[namespaceUuid];
-      if (idleServer) {
-        // Convert idle server to active server
-        delete this.idleServers[namespaceUuid];
-        this.activeServers[sessionId] = idleServer;
-        this.sessionToNamespace[sessionId] = namespaceUuid;
-        this.sessionTimestamps[sessionId] = Date.now();
-        this.applyAdminToolsContext(idleServer, adminTools);
-
-        logger.info(
-          `Converted idle MetaMCP server to active for namespace ${namespaceUuid}, session ${sessionId}`,
-        );
-
-        // Create a new idle server to replace the one we just used (ASYNC - NON-BLOCKING)
-        this.createIdleServerAsync(namespaceUuid, includeInactiveServers);
-
-        return idleServer;
-      }
-    }
-
-    // No idle server available (or client headers require a fresh server), create a new one
+    // No idle server available (or forwarded headers require a fresh one),
+    // create a new one
     const newServer = await this.createNewServer(
       sessionId,
       namespaceUuid,
       includeInactiveServers,
       clientRequestHeaders,
-      requestContext,
     );
     if (!newServer) {
       return undefined;
@@ -168,9 +162,8 @@ export class MetaMcpServerPool {
       `Created new active MetaMCP server for namespace ${namespaceUuid}, session ${sessionId}`,
     );
 
-    // Only pre-warm idle pool when headers aren't required — idle servers
-    // are created without clientRequestHeaders so they can't be reused when
-    // per-client header forwarding is needed.
+    // Also create an idle server for future use (ASYNC - NON-BLOCKING),
+    // unless this namespace can't use idle servers (forwarded headers).
     if (!needsFreshServer) {
       this.createIdleServerAsync(namespaceUuid, includeInactiveServers);
     }
@@ -178,14 +171,47 @@ export class MetaMcpServerPool {
     return newServer;
   }
 
+  /**
+   * Whether any server of the namespace requires per-client header
+   * forwarding (60 s TTL cache; cleared by invalidateIdleServer).
+   */
+  private async namespaceNeedsFreshServer(
+    namespaceUuid: string,
+    includeInactiveServers: boolean,
+  ): Promise<boolean> {
+    const cached = this.needsFreshServerCache[namespaceUuid];
+    if (cached && Date.now() < cached.expiresAt) {
+      return cached.needsFresh;
+    }
+    const serverParams = await getMcpServers(
+      namespaceUuid,
+      includeInactiveServers,
+    );
+    const needsFresh = anyServerRequiresForwardedHeaders(serverParams);
+    this.needsFreshServerCache[namespaceUuid] = {
+      needsFresh,
+      expiresAt: Date.now() + 60_000,
+    };
+    return needsFresh;
+  }
+
+  /**
+   * Bind (or clear) the MetaMCP admin-tools context for an instance. Keyed by
+   * the instance's handler-context session id, which is what the proxy's
+   * tools/list and tools/call handlers look it up by.
+   */
   private applyAdminToolsContext(
     serverInstance: MetaMcpServerInstance,
     adminTools?: AdminToolsOptions,
   ): void {
+    const key = serverInstance.handlerContext?.sessionId;
+    if (!key) {
+      return;
+    }
     if (adminTools?.enabled && adminTools.userId) {
-      setAdminToolsContext(serverInstance.internalSessionId, adminTools);
+      setAdminToolsContext(key, adminTools);
     } else {
-      clearAdminToolsContext(serverInstance.internalSessionId);
+      clearAdminToolsContext(key);
     }
   }
 
@@ -197,7 +223,6 @@ export class MetaMcpServerPool {
     namespaceUuid: string,
     includeInactiveServers: boolean = false,
     clientRequestHeaders?: Record<string, string>,
-    requestContext?: Pick<MetaMCPHandlerContext, "endpointName" | "auth">,
   ): Promise<MetaMcpServerInstance | undefined> {
     try {
       // Create the MetaMCP server - MCP server pool is pre-warmed during startup
@@ -206,14 +231,9 @@ export class MetaMcpServerPool {
         sessionId,
         includeInactiveServers,
         clientRequestHeaders,
-        requestContext,
       );
 
-      return {
-        server: serverInstance.server,
-        cleanup: serverInstance.cleanup,
-        internalSessionId: serverInstance.internalSessionId,
-      };
+      return serverInstance;
     } catch (error) {
       logger.error(
         `Error creating MetaMCP server for namespace ${namespaceUuid}:`,
@@ -231,28 +251,61 @@ export class MetaMcpServerPool {
     includeInactiveServers: boolean = false,
   ): Promise<void> {
     // Don't create if we already have an idle server for this namespace
-    if (this.idleServers[namespaceUuid]) {
+    // or one is already being created (by this method or the async
+    // variant). Without this guard, the concurrent invalidateIdleServer
+    // + invalidateOpenApiSessions fire-and-forget pair that every tRPC
+    // config edit launches both reached createNewServer, and the second
+    // assignment silently orphaned the first instance — leaking its
+    // backend ConnectedClients under a temp `idle_<ns>_<ts>` sessionId
+    // forever (persistent sessions never expire), ratcheting the
+    // backend pool toward cap exhaustion: the end state reached
+    // via the admin-edit route.
+    if (
+      this.idleServers[namespaceUuid] ||
+      this.creatingIdleServers.has(namespaceUuid)
+    ) {
       return;
     }
+    this.creatingIdleServers.add(namespaceUuid);
+    const generation = this.idleServerGenerations[namespaceUuid] ?? 0;
 
-    // Create a temporary sessionId for the idle server
-    const tempSessionId = `idle_${namespaceUuid}_${Date.now()}`;
+    try {
+      // Create a temporary sessionId for the idle server
+      const tempSessionId = `idle_${namespaceUuid}_${Date.now()}`;
 
-    const newServer = await this.createNewServer(
-      tempSessionId,
-      namespaceUuid,
-      includeInactiveServers,
-    );
-    if (newServer) {
-      // Wrap the server to handle session ID reassignment when converting from idle to active
-      const wrappedServer: MetaMcpServerInstance = {
+      const newServer = await this.createNewServer(
+        tempSessionId,
+        namespaceUuid,
+        includeInactiveServers,
+      );
+      if (!newServer) {
+        return;
+      }
+
+      // Discard (don't store) if an invalidation happened while we were
+      // connecting — this instance was built from the pre-change config —
+      // or if someone else landed an idle server first.
+      if (
+        (this.idleServerGenerations[namespaceUuid] ?? 0) !== generation ||
+        this.idleServers[namespaceUuid]
+      ) {
+        await newServer.cleanup().catch((error) => {
+          logger.error(
+            `Error cleaning up superseded idle MetaMCP server for ${namespaceUuid}:`,
+            error,
+          );
+        });
+        return;
+      }
+
+      this.idleServers[namespaceUuid] = {
         server: newServer.server,
         cleanup: newServer.cleanup,
-        internalSessionId: newServer.internalSessionId,
+        handlerContext: newServer.handlerContext,
       };
-
-      this.idleServers[namespaceUuid] = wrappedServer;
       logger.info(`Created idle MetaMCP server for namespace ${namespaceUuid}`);
+    } finally {
+      this.creatingIdleServers.delete(namespaceUuid);
     }
   }
 
@@ -273,24 +326,28 @@ export class MetaMcpServerPool {
 
     // Mark that we're creating an idle server for this namespace
     this.creatingIdleServers.add(namespaceUuid);
+    const generation = this.idleServerGenerations[namespaceUuid] ?? 0;
 
     // Create the server in the background (fire and forget)
     const tempSessionId = `idle_${namespaceUuid}_${Date.now()}`;
 
     this.createNewServer(tempSessionId, namespaceUuid, includeInactiveServers)
       .then((newServer) => {
-        if (newServer && !this.idleServers[namespaceUuid]) {
+        const stale =
+          (this.idleServerGenerations[namespaceUuid] ?? 0) !== generation;
+        if (newServer && !stale && !this.idleServers[namespaceUuid]) {
           const wrappedServer: MetaMcpServerInstance = {
             server: newServer.server,
             cleanup: newServer.cleanup,
-            internalSessionId: newServer.internalSessionId,
+            handlerContext: newServer.handlerContext,
           };
           this.idleServers[namespaceUuid] = wrappedServer;
           logger.info(
             `Created background idle MetaMCP server for namespace ${namespaceUuid}`,
           );
         } else if (newServer) {
-          // We already have an idle server, cleanup the extra one
+          // We already have an idle server (or an invalidation made this
+          // pre-change-config instance stale) — cleanup the extra one
           newServer.cleanup().catch((error) => {
             logger.error(
               `Error cleaning up extra idle MetaMCP server for ${namespaceUuid}:`,
@@ -336,30 +393,50 @@ export class MetaMcpServerPool {
       return;
     }
 
-    clearAdminToolsContext(activeServer.internalSessionId);
+    // Drop the maps FIRST. The two cleanup awaits below can reject, and
+    // when the deletes ran after them a single throw left a permanent
+    // zombie entry: getServer kept handing the half-cleaned instance to
+    // any client reusing the sessionId, and the expiry sweep retried
+    // (and failed) on it forever. Cleanup is best-effort; map
+    // consistency is not.
+    const namespaceUuid = this.sessionToNamespace[sessionId];
+    delete this.activeServers[sessionId];
+    delete this.sessionTimestamps[sessionId];
+    delete this.sessionToNamespace[sessionId];
+    if (activeServer.handlerContext?.sessionId) {
+      clearAdminToolsContext(activeServer.handlerContext.sessionId);
+    }
 
     // Cleanup the MetaMCP server
-    await activeServer.cleanup();
+    try {
+      await activeServer.cleanup();
+    } catch (error) {
+      logger.error(
+        `Error cleaning up MetaMCP server for session ${sessionId}:`,
+        error,
+      );
+    }
 
-    // Also cleanup the corresponding MCP server pool session
-    await mcpServerPool.cleanupSession(activeServer.internalSessionId);
+    // Also cleanup the corresponding MCP server pool session — in its
+    // own try/catch so a namespace-layer failure can't strand the
+    // backend-pool layer (and vice versa).
+    try {
+      await mcpServerPool.cleanupSession(sessionId);
+    } catch (error) {
+      logger.error(
+        `Error cleaning up backend pool session ${sessionId}:`,
+        error,
+      );
+    }
 
-    // Remove from active servers
-    delete this.activeServers[sessionId];
-
-    // Clean up session timestamp
-    delete this.sessionTimestamps[sessionId];
-
-    // Get the namespace UUID and create a new idle server if needed.
-    // Skip idle replenishment for namespaces that require forwarded headers
-    // since idle servers can't carry per-client headers.
-    const namespaceUuid = this.sessionToNamespace[sessionId];
-    if (namespaceUuid) {
-      const cached = this.needsFreshServerCache[namespaceUuid];
-      if (!cached || !cached.needsFresh) {
-        this.createIdleServerAsync(namespaceUuid);
-      }
-      delete this.sessionToNamespace[sessionId];
+    // Replace capacity with a new idle server (ASYNC - NON-BLOCKING), except
+    // for namespaces that require forwarded headers: idle servers can't
+    // carry per-client headers.
+    if (
+      namespaceUuid &&
+      !this.needsFreshServerCache[namespaceUuid]?.needsFresh
+    ) {
+      this.createIdleServerAsync(namespaceUuid);
     }
 
     logger.info(`Cleaned up MetaMCP server pool session ${sessionId}`);
@@ -369,6 +446,16 @@ export class MetaMcpServerPool {
    * Cleanup all servers
    */
   async cleanupAll(): Promise<void> {
+    // Invalidate every in-flight idle creation first so none of them
+    // stores a result into the maps we're about to clear.
+    for (const namespaceUuid of new Set([
+      ...Object.keys(this.idleServers),
+      ...this.creatingIdleServers,
+    ])) {
+      this.idleServerGenerations[namespaceUuid] =
+        (this.idleServerGenerations[namespaceUuid] ?? 0) + 1;
+    }
+
     // Cleanup all active servers
     const activeSessionIds = Object.keys(this.activeServers);
     await Promise.allSettled(
@@ -448,6 +535,11 @@ export class MetaMcpServerPool {
   ): Promise<void> {
     logger.info(`Invalidating idle server for namespace ${namespaceUuid}`);
 
+    // Invalidate any in-flight idle creation: a server being built from
+    // the PRE-change config must not land in the map after this point.
+    this.idleServerGenerations[namespaceUuid] =
+      (this.idleServerGenerations[namespaceUuid] ?? 0) + 1;
+
     // Cleanup existing idle server if it exists
     const existingIdleServer = this.idleServers[namespaceUuid];
     if (existingIdleServer) {
@@ -495,6 +587,11 @@ export class MetaMcpServerPool {
    */
   async cleanupIdleServer(namespaceUuid: string): Promise<void> {
     logger.info(`Cleaning up idle server for namespace ${namespaceUuid}`);
+
+    // Invalidate any in-flight idle creation so it discards its result
+    // (the namespace is going away).
+    this.idleServerGenerations[namespaceUuid] =
+      (this.idleServerGenerations[namespaceUuid] ?? 0) + 1;
 
     // Cleanup existing idle server if it exists
     const existingIdleServer = this.idleServers[namespaceUuid];
@@ -629,6 +726,26 @@ export class MetaMcpServerPool {
         delete this.sessionTimestamps[sessionId];
       }
 
+      // The instance's closure cleanup above tears down the backend-pool
+      // sessions it was CREATED under — for a converted idle server
+      // that's the temp `idle_<ns>_<ts>` id, NOT this session's
+      // `openapi_<ns>` id, which is what the OpenAPI request path
+      // actually keys backend sessions under (routes.ts /
+      // tool-execution.ts pass `openapi_${namespaceUuid}` to
+      // mcpServerPool.getSession). Without this explicit layer cleanup,
+      // the next OpenAPI request's getSession hit the active-session
+      // fast path and reused stale pre-change ConnectedClients
+      // indefinitely — "I updated the server, the MCP endpoint sees the
+      // change but the OpenAPI endpoint doesn't."
+      try {
+        await mcpServerPool.cleanupSession(sessionId);
+      } catch (error) {
+        logger.error(
+          `Error cleaning up backend pool session ${sessionId}:`,
+          error,
+        );
+      }
+
       // Create a new OpenAPI session with updated configuration
       await this.getOpenApiServer(namespaceUuid, includeInactiveServers);
     });
@@ -675,8 +792,15 @@ export class MetaMcpServerPool {
 
       // Clean up expired sessions
       if (expiredSessionIds.length > 0) {
+        // Count at info, ids at debug only: a live session-id list in a
+        // request-path log undoes the fork's session-id log hygiene. Dormant
+        // in prod (sessionLifetime is null there), but this timer fires the
+        // moment an operator sets a finite lifetime.
         logger.info(
-          `Cleaning up ${expiredSessionIds.length} expired MetaMCP server pool sessions: ${expiredSessionIds.join(", ")}`,
+          `Cleaning up ${expiredSessionIds.length} expired MetaMCP server pool sessions`,
+        );
+        logger.debug(
+          `Expired MetaMCP server pool session ids: ${expiredSessionIds.join(", ")}`,
         );
 
         await Promise.allSettled(
@@ -704,7 +828,10 @@ export class MetaMcpServerPool {
     if (age === undefined) return false;
 
     const sessionLifetime = await configService.getSessionLifetime();
-    if (sessionLifetime === null) return false; // null = no expiry configured
+    // null lifetime = persistent sessions (the default). Without this
+    // guard `age > null` coerces to `age > 0` and every session reads
+    // as expired the moment it's a millisecond old.
+    if (sessionLifetime === null) return false;
     return age > sessionLifetime;
   }
 }

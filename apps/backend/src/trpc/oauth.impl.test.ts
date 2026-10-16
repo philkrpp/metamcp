@@ -277,6 +277,104 @@ describe("oauthImplementations.exchangeToken", () => {
     if (!result.success)
       expect(result.error).toBe("client_information_missing");
   });
+
+  // MCP SDK 1.31 stamps `issuer` on what it stores, and the frontend
+  // provider withholds an unstamped refresh token. The browser SDK stamped
+  // the client registration in this same flow, so the tokens obtained with it
+  // carry that stamp; an `issuer` in the token response itself is ignored.
+  it("stamps the persisted tokens with the client registration's issuer", async () => {
+    const {
+      oauthImplementations,
+      findByMcpServerUuid,
+      upsert,
+      findServerByUuid,
+    } = await loadModule();
+    findServerByUuid.mockResolvedValue(
+      ownedServer(SERVER_UUID, "https://api.example.com/mcp"),
+    );
+    findByMcpServerUuid.mockResolvedValue({
+      mcp_server_uuid: SERVER_UUID,
+      code_verifier: "verifier",
+      client_information: {
+        client_id: "dcr-client",
+        issuer: "https://auth.example.com/",
+      },
+      tokens: null,
+    });
+    upsert.mockResolvedValue({});
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async (url) => {
+        const urlStr = typeof url === "string" ? url : (url as URL).toString();
+        if (urlStr.includes("/.well-known/")) {
+          return new Response("nope", { status: 404 });
+        }
+        return jsonResponse(200, {
+          access_token: "AT",
+          token_type: "Bearer",
+          refresh_token: "RT",
+          issuer: "https://evil.example/",
+        });
+      });
+
+    const result = await oauthImplementations.exchangeToken(
+      { mcp_server_uuid: SERVER_UUID, code: "C" },
+      USER_ID,
+    );
+
+    expect(result.success).toBe(true);
+    expect(upsert).toHaveBeenCalledWith({
+      mcp_server_uuid: SERVER_UUID,
+      tokens: expect.objectContaining({
+        refresh_token: "RT",
+        issuer: "https://auth.example.com/",
+      }),
+    });
+    fetchSpy.mockRestore();
+  });
+
+  it("stamps the SDK's legacy authorization server URL when the registration is unstamped", async () => {
+    const {
+      oauthImplementations,
+      findByMcpServerUuid,
+      upsert,
+      findServerByUuid,
+    } = await loadModule();
+    findServerByUuid.mockResolvedValue(
+      ownedServer(SERVER_UUID, "https://api.example.com/mcp"),
+    );
+    findByMcpServerUuid.mockResolvedValue({
+      mcp_server_uuid: SERVER_UUID,
+      code_verifier: "verifier",
+      client_information: { client_id: "legacy-client" },
+      tokens: null,
+    });
+    upsert.mockResolvedValue({});
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async (url) => {
+        const urlStr = typeof url === "string" ? url : (url as URL).toString();
+        if (urlStr.includes("/.well-known/")) {
+          return new Response("nope", { status: 404 });
+        }
+        return jsonResponse(200, {
+          access_token: "AT",
+          token_type: "Bearer",
+          refresh_token: "RT",
+        });
+      });
+
+    await oauthImplementations.exchangeToken(
+      { mcp_server_uuid: SERVER_UUID, code: "C" },
+      USER_ID,
+    );
+
+    expect(upsert).toHaveBeenCalledWith({
+      mcp_server_uuid: SERVER_UUID,
+      tokens: expect.objectContaining({ issuer: "https://api.example.com/" }),
+    });
+    fetchSpy.mockRestore();
+  });
 });
 
 // Regression test for redirect_uri byte-match. The frontend builds the

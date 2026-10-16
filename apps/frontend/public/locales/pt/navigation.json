@@ -9,5 +9,8 @@
   "liveLogs": "Logs em Tempo Real",
   "application": "Aplicação",
   "logout": "Sair",
-  "profile": "Perfil"
+  "profile": "Perfil",
+  "oauthClients": "OAuth Clients",
+  "access": "Access",
+  "accessGroups": "Access Groups"
 }

@@ -64,5 +64,29 @@
     "required": "A taxa máxima é obrigatória",
     "tooSmall": "A taxa máxima deve ser maior que 0",
     "tooLarge": "A taxa máxima deve ser menor que 1000000"
+  },
+  "oauthClientId": {
+    "required": "Client ID is required when any pre-registered OAuth field is set"
+  },
+  "oauthAuthorizationEndpoint": {
+    "invalid": "Authorization endpoint must be a valid URL"
+  },
+  "oauthTokenEndpoint": {
+    "invalid": "Token endpoint must be a valid URL"
+  },
+  "apiKeyScope": {
+    "required": "Select the endpoint this API key is scoped to, or choose all endpoints",
+    "exclusive": "Choose either a single endpoint or all endpoints, not both"
+  },
+  "apiKeyActsAs": {
+    "requiresEndpoint": "An identity-bound key must be scoped to a single endpoint — pick a specific endpoint or remove the acts-as user",
+    "ownerMismatch": "An identity-bound key must be owned by the user it acts as — a public or foreign-owned key cannot carry an identity binding"
+  },
+  "forwardHeaders": {
+    "invalidHeaderName": "Invalid or forbidden header name. Forbidden: Host, Cookie, Set-Cookie, Connection, Proxy-*, Sec-*, etc."
+  },
+  "apiKeyAdminPlane": {
+    "noScope": "An admin-plane (control-plane) key has no endpoint scope, clear the endpoint and all-endpoints selection",
+    "noActsAs": "An admin-plane (control-plane) key carries no acts-as identity, clear the acts-as user"
   }
 }

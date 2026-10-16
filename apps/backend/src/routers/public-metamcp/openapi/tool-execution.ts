@@ -3,24 +3,11 @@ import express from "express";
 
 import logger from "@/utils/logger";
 
-import { MetaMCPHandlerContext } from "../../../lib/metamcp/metamcp-middleware/functional-middleware";
+import { resolveCallerContext } from "../../../lib/metamcp/caller-context";
+import { resolveClientIdentity } from "../../../lib/metamcp/consumer-identity-resolver";
 import { metaMcpServerPool } from "../../../lib/metamcp/metamcp-server-pool";
 import { createMiddlewareEnabledHandlers } from "./handlers";
 import { ToolExecutionRequest } from "./types";
-
-function getRequestContext(
-  req: ToolExecutionRequest,
-): Pick<MetaMCPHandlerContext, "endpointName" | "auth"> {
-  return {
-    endpointName: req.endpointName,
-    auth: {
-      method: req.authMethod || "none",
-      apiKeyUuid: req.apiKeyUuid,
-      apiKeyUserId: req.apiKeyUserId,
-      oauthUserId: req.oauthUserId,
-    },
-  };
-}
 
 // Refactored tool execution logic to use middleware
 export const executeToolWithMiddleware = async (
@@ -42,12 +29,23 @@ export const executeToolWithMiddleware = async (
     // Use deterministic session ID for OpenAPI endpoints
     const sessionId = `openapi_${namespaceUuid}`;
 
+    // Resolve the calling consumer (api-key name / OAuth user) so the
+    // tool_call log shows WHO called it. Carried on the per-call context.
+    const clientIdentity = await resolveClientIdentity(req);
+
+    // Caller binding for the audit row (migration 0030): which credential,
+    // account, address and request. Resolved per call, from this request,
+    // because the OpenAPI session id is shared across every consumer of the
+    // namespace and therefore identifies nobody.
+    const caller = resolveCallerContext(req);
+
     // Create middleware-enabled handlers
     const { handlerContext, callToolWithMiddleware } =
       createMiddlewareEnabledHandlers(
         sessionId,
         namespaceUuid,
-        getRequestContext(req),
+        clientIdentity?.name,
+        caller,
       );
 
     // Use middleware-enabled call tool handler
@@ -66,12 +64,16 @@ export const executeToolWithMiddleware = async (
 
     // Check if the result indicates an error (from middleware)
     if (result.isError) {
+      // SDK 1.29 types content as a discriminated ContentBlock union; .text
+      // only exists on the text variant, so narrow before reading it.
       const firstBlock = result.content?.[0];
-      const message =
-        firstBlock && "text" in firstBlock ? firstBlock.text : undefined;
+      const errorMessage =
+        firstBlock?.type === "text" && firstBlock.text
+          ? firstBlock.text
+          : "Tool is inactive";
       return res.status(403).json({
         error: "Tool access denied",
-        message: message || "Tool is inactive",
+        message: errorMessage,
         timestamp: new Date().toISOString(),
       });
     }
@@ -79,7 +81,11 @@ export const executeToolWithMiddleware = async (
     // Return the result directly (simplified format)
     res.json(result);
   } catch (error) {
-    logger.error(`Error executing tool ${toolName}:`, error);
+    // JSON.stringify the caller-controlled tool name before it enters a log
+    // line: `tool_name` is a URL-decoded path segment, so an embedded CR/LF
+    // would forge whole log lines. Same discipline as the mcp-proxy
+    // connection log.
+    logger.error(`Error executing tool ${JSON.stringify(toolName)}:`, error);
 
     // Handle different types of errors
     if (error instanceof Error) {

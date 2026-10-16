@@ -1,6 +1,11 @@
 import { ConfigKey, ConfigKeyEnum } from "@repo/zod-types";
 
 import { configRepo } from "../db/repositories/config.repo";
+import {
+  type GlobalIpPolicy,
+  type IpPolicyMode,
+  parseStoredGlobalPolicy,
+} from "./api-key-ip-policy";
 
 export const configService = {
   async isSignupDisabled(): Promise<boolean> {
@@ -108,6 +113,29 @@ export const configService = {
     );
   },
 
+  /**
+   * Per-attempt hard cap (ms) for the bounded reconnect-window warmup
+   * on the tools/call path (metamcp-proxy.ts / openapi/handlers.ts).
+   * Default 5s: long enough to catch the common watchtower-bounce
+   * reconnect, short enough that a genuinely dead upstream still fails
+   * fast instead of hanging the caller on `client.ts`'s much longer
+   * (up to 30s+ per hop) internal reconnect backoff.
+   */
+  async getMcpToolCallReconnectWarmupTimeout(): Promise<number> {
+    const config = await configRepo.getConfig(
+      ConfigKeyEnum.enum.MCP_TOOL_CALL_RECONNECT_WARMUP_TIMEOUT,
+    );
+    return config?.value ? parseInt(config.value, 10) : 5000;
+  },
+
+  async setMcpToolCallReconnectWarmupTimeout(timeout: number): Promise<void> {
+    await configRepo.setConfig(
+      ConfigKeyEnum.enum.MCP_TOOL_CALL_RECONNECT_WARMUP_TIMEOUT,
+      timeout.toString(),
+      "Per-attempt hard cap (ms) for the tools/call reconnect-window warmup",
+    );
+  },
+
   async getSessionLifetime(): Promise<number | null> {
     const config = await configRepo.getConfig(
       ConfigKeyEnum.enum.SESSION_LIFETIME,
@@ -136,6 +164,60 @@ export const configService = {
         "Session lifetime in milliseconds before automatic cleanup",
       );
     }
+  },
+
+  /**
+   * The GLOBAL API-key IP policy (migration 0041), read live on every key
+   * validation that needs it, the way DISABLE_BASIC_AUTH is read per request:
+   * one query for both rows, no cache, so a change made through the admin
+   * plane applies to the very next request. `problems` lists stored values the
+   * parser could not read; see parseStoredGlobalPolicy for how each is read
+   * (always fail closed).
+   */
+  async getApiKeyIpPolicy(): Promise<GlobalIpPolicy & { problems: string[] }> {
+    const rows = await configRepo.getConfigs([
+      ConfigKeyEnum.enum.API_KEY_IP_POLICY_MODE,
+      ConfigKeyEnum.enum.API_KEY_IP_ALLOWED_CIDRS,
+    ]);
+    const value = (id: string) => rows.find((row) => row.id === id)?.value;
+    return parseStoredGlobalPolicy(
+      value(ConfigKeyEnum.enum.API_KEY_IP_POLICY_MODE),
+      value(ConfigKeyEnum.enum.API_KEY_IP_ALLOWED_CIDRS),
+    );
+  },
+
+  /**
+   * Write the global policy. The caller (apiKeys.setGlobalIpPolicy) has
+   * already validated and canonicalised the list; both rows and the snapshots
+   * used for the audit/readback share one serialized transaction.
+   */
+  async setApiKeyIpPolicy(policy: {
+    mode: IpPolicyMode;
+    cidrs: string[];
+  }): Promise<{ before: GlobalIpPolicy; after: GlobalIpPolicy }> {
+    const snapshots = await configRepo.setConfigs([
+      {
+        id: ConfigKeyEnum.enum.API_KEY_IP_POLICY_MODE,
+        value: policy.mode,
+        description:
+          "Global API-key IP policy mode (off | audit | enforce) for keys with no allowed_cidrs of their own",
+      },
+      {
+        id: ConfigKeyEnum.enum.API_KEY_IP_ALLOWED_CIDRS,
+        value: JSON.stringify(policy.cidrs),
+        description:
+          "Global API-key IP allowlist (JSON array of CIDRs) for keys with no allowed_cidrs of their own",
+      },
+    ]);
+    const parse = (rows: Array<{ id: string; value: string }>) =>
+      parseStoredGlobalPolicy(
+        rows.find((row) => row.id === ConfigKeyEnum.enum.API_KEY_IP_POLICY_MODE)
+          ?.value,
+        rows.find(
+          (row) => row.id === ConfigKeyEnum.enum.API_KEY_IP_ALLOWED_CIDRS,
+        )?.value,
+      );
+    return { before: parse(snapshots.before), after: parse(snapshots.after) };
   },
 
   async getConfig(key: ConfigKey): Promise<string | undefined> {

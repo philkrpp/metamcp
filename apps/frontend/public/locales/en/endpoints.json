@@ -117,7 +117,9 @@
     "updateSuccess": "Endpoint Updated",
     "updateSuccessDescription": "Endpoint has been updated successfully",
     "updateFailed": "Update Failed",
-    "updateFailedDescription": "Failed to update endpoint"
+    "updateFailedDescription": "Failed to update endpoint",
+    "requireScopedApiKeyLabel": "Require Endpoint-Scoped API Keys",
+    "requireScopedApiKeyDescription": "Only accept API keys scoped to this endpoint; reject gateway-wide (unscoped) keys. Applies to API-key auth only — OAuth access is unaffected."
   },
   "list": {
     "title": "Endpoints",
@@ -141,6 +143,7 @@
     "editEndpoint": "Edit endpoint",
     "deleteConfirmTitle": "Delete Endpoint",
     "deleteConfirmDescription": "Are you sure you want to delete the endpoint \"{{name}}\"? This action cannot be undone and will make the endpoint inaccessible.",
+    "deleteConfirmScopedKeyWarning": "Any API keys scoped to this endpoint will also be permanently deleted.",
     "deleting": "Deleting...",
     "deleteSuccess": "Endpoint deleted successfully",
     "deleteError": "Failed to delete endpoint",
@@ -153,5 +156,9 @@
     "openApiUrlWithApiKeyCopied": "OpenAPI URL with API key parameter copied to clipboard",
     "openApiSchemaUrlWithApiKeyCopied": "OpenAPI Schema URL with API key parameter copied to clipboard",
     "noResults": "No results."
-  }
+  },
+  "requireScopedApiKey": "Require Endpoint-Scoped API Keys",
+  "requireScopedApiKeyDescription": "Only accept API keys scoped to this endpoint; reject gateway-wide (unscoped) keys. Applies to API-key auth only — OAuth access is unaffected.",
+  "restrictedLabel": "Restrict to access groups",
+  "restrictedDescription": "When on, only administrators and members of a mapped access group reach this endpoint over OAuth. Turning it on also requires endpoint-scoped API keys, so unscoped gateway-wide keys are rejected too."
 }

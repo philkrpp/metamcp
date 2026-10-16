@@ -11,14 +11,20 @@ import {
 const slidingWindowRateLimit = new SlidingWindowRateLimiting();
 const tokenBucketRateLimit = new RateLimiting();
 
-// Periodic cleanup of stale rate limiter entries (every 30 minutes)
+// Sweep the per-client sliding-window map every 10 minutes so it cannot grow
+// unbounded for the life of the process. `unref` for the same reason as the
+// auth limiter's sweep: this is housekeeping and must never keep the event
+// loop (or a test that merely imports this module) alive. Mirrors
+// lib/auth-rate-limiter's timer.
 setInterval(
   () => {
-    tokenBucketRateLimit.cleanup();
     slidingWindowRateLimit.cleanup();
+    // Token buckets are keyed per endpoint config and credential, so they
+    // need the same sweep.
+    tokenBucketRateLimit.cleanup();
   },
-  30 * 60 * 1000,
-);
+  10 * 60 * 1000,
+).unref();
 
 interface RateLimitOptions extends express.Request {
   endpoint: DatabaseEndpoint;
@@ -27,77 +33,75 @@ interface RateLimitOptions extends express.Request {
 /**
  * Express adapter for TokenBucket rate limiting middleware
  */
-const tokenBucketHandler = async function (
-  req: Request,
-  res: Response,
-  next: NextFunction,
-) {
-  try {
-    await tokenBucketRateLimit.onRequest({ req }, async () => {
-      return next();
-    });
-  } catch (err) {
-    if (err instanceof RateLimitError) {
-      res.status(429).json({ error: err.message });
-    } else {
-      next(err);
+const tokenBucketRateLimiter = () => {
+  const limiter = tokenBucketRateLimit;
+
+  return async function (req: Request, res: Response, next: NextFunction) {
+    try {
+      await limiter.onRequest({ req }, async () => {
+        return next();
+      });
+    } catch (err) {
+      if (err instanceof RateLimitError) {
+        res.status(503).json({ error: err.message });
+      } else {
+        next(err);
+      }
     }
-  }
+  };
 };
 
 /**
  * Express adapter for Sliding Window rate limiting middleware
  */
-const slidingWindowHandler = async function (
-  req: Request,
-  res: Response,
-  next: NextFunction,
-) {
-  try {
-    await slidingWindowRateLimit.onRequest({ req }, async () => {
-      return next();
-    });
-  } catch (err) {
-    if (err instanceof RateLimitError) {
-      res.status(429).json({ error: err.message });
-    } else {
-      next(err);
+const slidingWindowRateLimiter = () => {
+  const limiter = slidingWindowRateLimit;
+
+  return async function (req: Request, res: Response, next: NextFunction) {
+    try {
+      await limiter.onRequest({ req }, async () => {
+        return next();
+      });
+    } catch (err) {
+      if (err instanceof RateLimitError) {
+        res.status(429).json({ error: err.message });
+      } else {
+        next(err);
+      }
     }
-  }
+  };
 };
 
 /**
  * Combined rate limiter that runs both sliding window and token bucket limiters sequentially
  */
-const combinedHandler = async function (
-  req: Request,
-  res: Response,
-  next: NextFunction,
-) {
-  // First, run sliding window rate limiter
-  try {
-    await slidingWindowRateLimit.onRequest({ req }, async () => {
-      // If sliding window passes, run token bucket rate limiter
-      try {
-        await tokenBucketRateLimit.onRequest({ req }, async () => {
-          // Both limiters passed, proceed to next middleware
-          return next();
-        });
-      } catch (err) {
-        if (err instanceof RateLimitError) {
-          res.status(429).json({ error: err.message });
-        } else {
-          next(err);
+const rateLimiter = () => {
+  return async function (req: Request, res: Response, next: NextFunction) {
+    // First, run sliding window rate limiter
+    try {
+      await slidingWindowRateLimit.onRequest({ req }, async () => {
+        // If sliding window passes, run token bucket rate limiter
+        try {
+          await tokenBucketRateLimit.onRequest({ req }, async () => {
+            // Both limiters passed, proceed to next middleware
+            return next();
+          });
+        } catch (err) {
+          if (err instanceof RateLimitError) {
+            res.status(503).json({ error: err.message });
+          } else {
+            next(err);
+          }
         }
+      });
+    } catch (err) {
+      if (err instanceof RateLimitError) {
+        res.status(429).json({ error: err.message });
+      } else {
+        next(err);
       }
-    });
-  } catch (err) {
-    if (err instanceof RateLimitError) {
-      res.status(429).json({ error: err.message });
-    } else {
-      next(err);
     }
-  }
+  };
 };
 
 export const rateLimitMiddleware = (
@@ -107,11 +111,11 @@ export const rateLimitMiddleware = (
 ) => {
   const { endpoint } = req as RateLimitOptions;
   if (endpoint.enable_client_max_rate && endpoint.enable_max_rate) {
-    combinedHandler(req, res, next);
+    rateLimiter()(req, res, next);
   } else if (endpoint.enable_client_max_rate) {
-    slidingWindowHandler(req, res, next);
+    slidingWindowRateLimiter()(req, res, next);
   } else if (endpoint.enable_max_rate) {
-    tokenBucketHandler(req, res, next);
+    tokenBucketRateLimiter()(req, res, next);
   } else {
     next();
   }

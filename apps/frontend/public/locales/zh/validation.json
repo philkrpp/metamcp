@@ -32,6 +32,14 @@
   "apiKeyName": {
     "required": "API 密钥名称为必填项"
   },
+  "apiKeyScope": {
+    "required": "请选择此 API 密钥限定的端点，或选择所有端点",
+    "exclusive": "只能选择单个端点或所有端点，不能同时选择"
+  },
+  "apiKeyActsAs": {
+    "requiresEndpoint": "绑定身份的密钥必须限定到单个端点 — 请选择特定端点或移除身份用户",
+    "ownerMismatch": "绑定身份的密钥必须由其代表的用户拥有 — 公共密钥或他人拥有的密钥不能携带身份绑定"
+  },
   "description": {
     "tooLong": "描述过长"
   },
@@ -47,5 +55,38 @@
     "required": "此字段为必填项",
     "tooShort": "太短",
     "tooLong": "太长"
+  },
+  "apiKeyAdminPlane": {
+    "noScope": "管理平面（控制平面）密钥没有端点范围, 请清除端点和所有端点的选择",
+    "noActsAs": "管理平面（控制平面）密钥不携带代理身份, 请清除代理用户"
+  },
+  "oauthClientId": {
+    "required": "Client ID is required when any pre-registered OAuth field is set"
+  },
+  "oauthAuthorizationEndpoint": {
+    "invalid": "Authorization endpoint must be a valid URL"
+  },
+  "oauthTokenEndpoint": {
+    "invalid": "Token endpoint must be a valid URL"
+  },
+  "maxRateSeconds": {
+    "required": "Max rate seconds is required",
+    "tooSmall": "Max rate must be greater than 0",
+    "tooLarge": "Max rate must be less than 1000000"
+  },
+  "maxRate": {
+    "required": "Max rate is required",
+    "tooSmall": "Max rate must be greater than 0",
+    "tooLarge": "Max rate must be less than 1000000"
+  },
+  "clientMaxRateSeconds": {
+    "required": "Max rate seconds is required",
+    "tooSmall": "Max rate must be greater than 0",
+    "tooLarge": "Max rate must be less than 1000000"
+  },
+  "clientMaxRate": {
+    "required": "Max rate is required",
+    "tooSmall": "Max rate must be greater than 0",
+    "tooLarge": "Max rate must be less than 1000000"
   }
 }

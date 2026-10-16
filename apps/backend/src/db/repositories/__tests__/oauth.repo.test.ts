@@ -33,9 +33,10 @@ describe("OAuthRepository.cleanupExpired", () => {
     // because drizzle's SQL has no `.not()`. It must build via `isNull(...)`.
     await expect(oauthRepository.cleanupExpired()).resolves.toBeUndefined();
 
-    // Three deletes: expired auth codes, fully-expired tokens, null-refresh
-    // tokens. Each must have built a WHERE condition.
-    expect(whereCalls).toHaveLength(3);
+    // Four deletes: expired auth codes, fully-expired tokens, null-refresh
+    // tokens, expired rotated-refresh-token markers (umbrella migration
+    // 0037). Each must have built a WHERE condition.
+    expect(whereCalls).toHaveLength(4);
     for (const condition of whereCalls) {
       expect(condition).toBeDefined();
     }

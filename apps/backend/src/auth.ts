@@ -1,15 +1,50 @@
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
+import { APIError, createAuthMiddleware } from "better-auth/api";
 import { genericOAuth, GenericOAuthConfig } from "better-auth/plugins";
 
 import { db } from "./db/index";
+// Imported from the module directly, not the repositories barrel: the barrel
+// pulls in every repository (and their transitive imports) into the auth
+// module graph, which is loaded before almost everything else.
+import { usersRepository } from "./db/repositories/users.repo";
 import * as schema from "./db/schema";
+import {
+  emitSessionCreated,
+  emitSessionRevoked,
+  emitSignupCreated,
+  emitSignupDenied,
+} from "./lib/audit/auth-hook-audit";
+import { isBootstrapSignupAllowed } from "./lib/bootstrap-signup-override";
 import { configService } from "./lib/config.service";
+import { shouldRefuseAuthSecretInProduction } from "./lib/shipped-placeholders";
 import logger from "./utils/logger";
 
 // Provide default values for development
 if (!process.env.BETTER_AUTH_SECRET) {
   throw new Error("BETTER_AUTH_SECRET environment variable is required");
+}
+// Refuse to boot in production on the signing key example.env ships.
+// This runs at module load, before app.listen and before any request can
+// arrive, and it is a hard throw rather than a warning because a gateway
+// signing sessions with the published key lets anyone who read the repository
+// mint a valid cookie for any account, admin included: authentication is
+// bypassed wholesale, not merely weakened. It stays fatal regardless of
+// BOOTSTRAP_FAIL_HARD (unlike the bootstrap-password guard in
+// lib/bootstrap.service, whose failure only skips creating one account). Kept
+// as a predicate in lib/shipped-placeholders so both guards read the published
+// value from one place and the decision is testable without booting this graph.
+if (
+  shouldRefuseAuthSecretInProduction(
+    process.env.BETTER_AUTH_SECRET,
+    process.env.NODE_ENV,
+  )
+) {
+  throw new Error(
+    "Refusing to boot: BETTER_AUTH_SECRET is the placeholder published in " +
+      "example.env and NODE_ENV=production. Generate one with " +
+      "`openssl rand -hex 32`, set BETTER_AUTH_SECRET and restart.",
+  );
 }
 if (!process.env.APP_URL) {
   throw new Error("APP_URL environment variable is required");
@@ -18,18 +53,73 @@ if (!process.env.APP_URL) {
 const BETTER_AUTH_SECRET = process.env.BETTER_AUTH_SECRET;
 const BETTER_AUTH_URL = process.env.APP_URL;
 
-// Helper function to create basic auth middleware
-const createBasicAuthCheckMiddleware = () => {
-  return async (request: unknown) => {
-    const isBasicAuthDisabled = await configService.isBasicAuthDisabled();
-    if (isBasicAuthDisabled) {
-      throw new Error(
-        "Basic email/password authentication is currently disabled. Please use SSO/OIDC authentication instead.",
+// The credential paths better-auth 1.6.23 registers for email/password auth,
+// as they appear in `ctx.path` (the endpoint path with the `/api/auth` base
+// already stripped). `/reset-password` is matched by prefix so the
+// `/reset-password/:token` callback endpoint is covered by the same rule.
+//
+// Verified against the installed better-auth routes (sign-in.mjs, sign-up.mjs,
+// password.mjs): `/request-password-reset` is this version's name for
+// forgot-password, and `/forget-password` is not a registered server endpoint
+// here. SSO stays reachable ON PURPOSE. `/sign-in/social`, the OIDC callbacks
+// (`/oauth2/callback/:id`, `/callback/:id`), `/oauth/*`, `/sign-out` and the
+// session reads are all absent from this set, so disabling password login
+// never strands an SSO user or breaks an in-flight OAuth authorize.
+const isBasicAuthCredentialPath = (path: string): boolean =>
+  path === "/sign-in/email" ||
+  path === "/sign-up/email" ||
+  path === "/request-password-reset" ||
+  path === "/reset-password" ||
+  path.startsWith("/reset-password/");
+
+// Enforce the DISABLE_BASIC_AUTH setting on the credential paths.
+//
+// WHY A HOOK, NOT A `middleware` OPTION. better-auth 1.6.23's options type has
+// no top-level `middleware` field: an array passed there is silently dropped,
+// so the previous wiring never ran and a stored DISABLE_BASIC_AUTH=true still
+// let password sign-in through. `hooks.before` is the request middleware this
+// version documents and actually consumes: its dispatcher reads
+// `options.hooks.before` and registers it with `matcher: () => true`, so it
+// runs ahead of every endpoint and the path match belongs here in the handler.
+//
+// The flag is read LIVE per request: it is DB-backed and toggled from Settings
+// at runtime, so a flip must take effect on the next request with no restart.
+// Throwing an APIError('FORBIDDEN') yields an honest 403 the login page can
+// show, and no session is created because the endpoint handler never runs.
+const basicAuthEnforcementHook = createAuthMiddleware(async (ctx) => {
+  if (!isBasicAuthCredentialPath(ctx.path)) return;
+  if (await configService.isBasicAuthDisabled()) {
+    throw new APIError("FORBIDDEN", {
+      message:
+        "Basic email/password authentication is disabled. Sign in with SSO/OIDC instead.",
+    });
+  }
+});
+
+// One boot-time signal for the effective DISABLE_BASIC_AUTH state, called from
+// index.ts after the DB is reachable (the setting is DB-backed). Logs the
+// posture only, never a secret, so the boot log answers "is password login on?"
+// without an operator querying the config table. Self-swallowing: a config read
+// that fails must not turn a posture question into a failed boot, and the live
+// per-request hook remains the enforcement point regardless.
+export async function logBasicAuthEnforcementState(): Promise<void> {
+  try {
+    if (await configService.isBasicAuthDisabled()) {
+      logger.info(
+        "DISABLE_BASIC_AUTH=true: password sign-in, sign-up and password-reset are refused (403); SSO/OIDC only.",
+      );
+    } else {
+      logger.info(
+        "DISABLE_BASIC_AUTH=false: email/password sign-in is enabled.",
       );
     }
-    return { request };
-  };
-};
+  } catch (err) {
+    logger.warn(
+      "Could not read DISABLE_BASIC_AUTH at boot; password-login posture unknown until first request:",
+      err,
+    );
+  }
+}
 
 // OIDC Provider configuration - optional, only if environment variables are provided
 const oidcProviders: GenericOAuthConfig[] = [];
@@ -85,6 +175,51 @@ export const auth = betterAuth({
     },
   }),
   trustedOrigins,
+  // OFF EXPLICITLY, because it is currently off only by accident, and because
+  // turning it on in its default shape would be worse than leaving it off.
+  //
+  // better-auth defaults this to `enabled ?? isProduction`, so today the
+  // limiter is disabled purely because NODE_ENV is unset in the container. A
+  // deployment that picks up `NODE_ENV=production`, which `example.env` ships
+  // on its first line, would enable it as a side effect of an unrelated
+  // environment edit.
+  //
+  // WHY THAT WOULD BE A SELF-DoS. The key is `${ip}|${path}`, and better-auth
+  // resolves that ip from `x-forwarded-for` ONLY (its default
+  // `ipAddressHeaders`), never from `CF-Connecting-IP`. With no
+  // `trustedProxies` configured it accepts the header only when it carries
+  // exactly one entry, and behind this deployment's
+  // `client -> Cloudflare -> cloudflared -> Next.js rewrite -> express` chain
+  // it carries more, so the address resolves to null and the limiter falls
+  // back to the literal key `no-trusted-ip`: ONE shared bucket per path for
+  // every caller. It logs a warning once when that happens, so this is loud
+  // rather than silent, but the bucket is the problem either way. And the
+  // default rules are tighter than the headline 100-per-10s: better-auth
+  // applies a special rule of window 10s / max 3 to `/sign-in*`, `/sign-up*`,
+  // `/change-password*` and `/change-email*`. Three sign-in attempts per ten
+  // seconds, shared globally, means any single caller can lock everyone else
+  // out of signing in. An availability control an attacker can aim at other
+  // users is inverted, which is the same defect this fork's own failed-auth
+  // limiter had when it keyed on `req.ip`.
+  //
+  // WHAT THIS PIN DOES NOT DO. It prevents that inversion; it does not by
+  // itself put a limiter on `/api/auth`. That surface is served by
+  // `routers/auth-relay.ts` calling `auth.handler` directly, so a limiter has
+  // to be mounted ahead of the relay — which is what
+  // `middleware/auth-signin-rate-limit.middleware` now is, keyed per caller on
+  // `CF-Connecting-IP` via `lib/client-ip` the way the fork's other limiters
+  // already are (`lib/auth-rate-limiter` on the lookup-endpoint, token and
+  // api-key-oauth paths, `routers/oauth/utils` on `/oauth/*`,
+  // `middleware/trpc-rate-limit.middleware` on `/trpc`). It covers the
+  // credential sign-in POST and deliberately nothing else on this surface.
+  //
+  // That is the remedy rather than enabling this one, and the order matters:
+  // enabling better-auth's would first need
+  // `advanced.ipAddress.ipAddressHeaders` / `trustedProxies` set so the address
+  // resolves per caller, and until that is done, on is strictly worse than off.
+  // Two limiters on the same path with different keying would also make a
+  // refusal impossible to attribute.
+  rateLimit: { enabled: false },
   plugins: [
     // Add generic OAuth plugin for OIDC support
     ...(oidcProviders.length > 0
@@ -96,6 +231,15 @@ export const auth = betterAuth({
     requireEmailVerification: false, // Set to true if you want email verification
   },
   account: {
+    // Encrypt the provider tokens (access, refresh, id) better-auth stores in
+    // the `accounts` table for Entra SSO users. Without this they are written
+    // in plaintext at rest; with it better-auth applies symmetric
+    // encryption keyed on BETTER_AUTH_SECRET. Existing rows stay plaintext
+    // until the user re-authenticates and the row is rewritten. The scopes
+    // requested here are minimal (openid email profile, no offline_access), so
+    // a refresh token is generally not issued and the stored access token is
+    // short-lived and low-scope, but encrypting at rest is the correct default.
+    encryptOAuthTokens: true,
     accountLinking: {
       enabled: true,
       // Allow linking accounts with the same email address
@@ -108,21 +252,21 @@ export const auth = betterAuth({
       requireEmailVerification: false,
     },
   },
+  // Umbrella fork: session lifetime is env-var configurable so we can pull
+  // Entra-SSO re-auth out of the daily path. Defaults bumped from 7d/1d to
+  // 30d/7d (max-connectivity policy). The OAuth refresh-token TTL is the
+  // outer ceiling; this is the inner one (the cookie that gates
+  // /oauth/authorize). See UMBRELLA_FORK.md.
   session: {
-    // Session lifetimes are env-var configurable so deployers can tune
-    // how often users re-touch the gateway via SSO without rebuilding
-    // the image. Defaults match the previous hardcoded values exactly,
-    // so this is a strict superset — no behavior change for existing
-    // installs that don't set the env vars.
     expiresIn: (() => {
       const raw = process.env.BETTER_AUTH_SESSION_EXPIRES_IN_SECONDS;
       const parsed = raw ? Number.parseInt(raw, 10) : NaN;
-      return Number.isFinite(parsed) && parsed > 0 ? parsed : 60 * 60 * 24 * 7; // 7 days (default)
+      return Number.isFinite(parsed) && parsed > 0 ? parsed : 60 * 60 * 24 * 30; // 30 days
     })(),
     updateAge: (() => {
       const raw = process.env.BETTER_AUTH_SESSION_UPDATE_AGE_SECONDS;
       const parsed = raw ? Number.parseInt(raw, 10) : NaN;
-      return Number.isFinite(parsed) && parsed > 0 ? parsed : 60 * 60 * 24; // 1 day (default — how often the session expiry is bumped on access)
+      return Number.isFinite(parsed) && parsed > 0 ? parsed : 60 * 60 * 24 * 7; // 7 days (sliding refresh)
     })(),
   },
   user: {
@@ -131,11 +275,36 @@ export const auth = betterAuth({
         type: "boolean",
         defaultValue: false,
       },
+      // RBAC role surfaced into the session user so both the backend
+      // (adminProcedure reads ctx.user.role) and the frontend (nav/mint
+      // gating reads session.user.role) get it without a second query.
+      // `input: false` is the security boundary: better-auth will NOT accept
+      // a client-supplied role on sign-up or user-update, so a member can
+      // never self-promote to admin — role is set only by the DB default
+      // ('member') and the seed migration / a direct DB update. Sessions are
+      // read fresh from the DB per request here (no cookie-cache configured),
+      // so a demotion takes effect immediately.
+      role: {
+        type: "string",
+        defaultValue: "member",
+        input: false,
+      },
     },
   },
   advanced: {
+    // Host-only session cookie. With crossSubDomainCookies enabled,
+    // better-auth 1.6.23 sets the cookie Domain to the APP_URL hostname, so the
+    // authenticated session cookie is sent to that host AND every subdomain of
+    // it. The frontend proxies the backend on localhost within one container
+    // (apps/frontend/next.config.js rewrites all of /api/auth, /trpc and
+    // /oauth to http://localhost:12009), so both planes are served from the
+    // single gateway host and nothing needs the cookie shared across
+    // subdomains. Disabled means better-auth omits the Domain attribute and the
+    // cookie stays host-only, so a future host published beneath the gateway
+    // name cannot receive the session. Pin an explicit narrow `domain` here
+    // only if a subdomain ever genuinely needs the session.
     crossSubDomainCookies: {
-      enabled: true,
+      enabled: false,
     },
   },
   logger: {
@@ -149,6 +318,23 @@ export const auth = betterAuth({
           const isSignupDisabled = await configService.isSignupDisabled();
           const isSsoSignupDisabled = await configService.isSsoSignupDisabled();
 
+          // The bootstrap exemption. Bootstrap onboards its configured
+          // administrators through THIS route, and this fork stores
+          // DISABLE_SIGNUP=true from the first boot onward, so without the
+          // exemption a restart with BOOTSTRAP_RECREATE_USER=true deletes the
+          // administrator (and its API keys) and is then refused permission to
+          // recreate it. The flag is false for every request that arrives over
+          // HTTP: it is only ever true inside the pre-listen bootstrap pass,
+          // and lib/bootstrap-signup-override.ts carries the full argument for
+          // why that leaves no reachable open-signup window.
+          //
+          // Applied to BOTH branches rather than only the basic-auth one:
+          // `isSsoRegistration` below is a path heuristic, not a fact about the
+          // caller, so scoping the exemption by branch would make bootstrap's
+          // success depend on how better-auth happens to label the request.
+          // The flag itself is what scopes this, and it is scoped to bootstrap.
+          const isBootstrapSignup = isBootstrapSignupAllowed();
+
           // Determine if this is an SSO/OAuth registration by checking the request path
           // OAuth/SSO registrations typically come through callback endpoints
           const isSsoRegistration =
@@ -157,41 +343,120 @@ export const auth = betterAuth({
             context?.path?.includes("/oidc/");
 
           if (isSsoRegistration) {
-            if (isSsoSignupDisabled) {
+            if (isSsoSignupDisabled && !isBootstrapSignup) {
+              // The abuse's front door, from the inside. When
+              // self-registration was open the accounts that
+              // walked through it left no trace beyond the `users` rows
+              // themselves; when it is CLOSED, the attempts that bounce off
+              // it leave nothing at all — and a burst of them is the clearest
+              // possible signal that someone is still trying. Emitted before
+              // the throw, by a helper that cannot throw, so the caller's
+              // rejection is unchanged.
+              emitSignupDenied(user, context, "sso");
               throw new Error(
                 "New user registration via SSO/OAuth is currently disabled.",
               );
             }
           } else {
-            if (isSignupDisabled) {
+            if (isSignupDisabled && !isBootstrapSignup) {
+              emitSignupDenied(user, context, "basic");
               throw new Error("New user registration is currently disabled.");
             }
           }
 
           return { data: user };
         },
+
+        // Only reachable on success — `before` above is what refuses a
+        // registration, so anything arriving here is an account that now
+        // exists. This is the row that answers "when did this account appear
+        // and from where", which the 2026-08-13 review had to reconstruct
+        // from `users.created_at` and inference.
+        after: async (user, context) => {
+          emitSignupCreated(user, context);
+        },
+      },
+    },
+    session: {
+      create: {
+        // HALF ONE of two-part enforcement for `users.disabled` (migration
+        // 0027): refuse to mint a session for a locked account. This is the
+        // hook every sign-in path funnels through — email/password, OIDC
+        // callback, account linking — so one guard here covers all of them
+        // without having to enumerate endpoints.
+        //
+        // HALF TWO lives in `createContext` (src/trpc.ts) and the OAuth
+        // authorize handler, and it is not optional: sessions in this fork
+        // live 30 days, so blocking new logins alone would leave a disabled
+        // attacker working from the session they already hold for a month.
+        // Together the two halves mean "disabled" takes effect on the very
+        // next request, which is the only definition of disabled worth
+        // shipping during a live investigation.
+        //
+        // Throwing (rather than returning `false`) is deliberate: better-auth
+        // treats a `false` return as "abort and return null", which surfaces
+        // to the user as an opaque broken sign-in. An APIError produces an
+        // honest 403 with a message the login page can show.
+        before: async (session) => {
+          const userId = (session as { userId?: string }).userId;
+          if (!userId) return { data: session };
+
+          // Read straight from the database rather than from anything on the
+          // session being built — the flag must be current as of THIS login,
+          // not as of whenever some cached value was populated.
+          if (await usersRepository.isDisabled(userId)) {
+            logger.warn(
+              `Blocked session creation for disabled account ${userId}`,
+            );
+            throw new APIError("FORBIDDEN", {
+              message: "This account has been disabled.",
+            });
+          }
+
+          return { data: session };
+        },
+
+        // The universal record of "a credential that grants access to this
+        // gateway came into existence". Every sign-in path funnels through
+        // it — email/password, the OIDC callback, account linking — which is
+        // why it is wired IN ADDITION to the `/api/auth` relay wrap in
+        // index.ts: that wrap can only read a status code, and a 200 from
+        // `sign-in/social` means "here is a redirect URL", not "someone
+        // authenticated". SSO logins are recorded here or nowhere.
+        //
+        // This is also the direct replacement for the forensic record lost at
+        // containment on 2026-08-13, when the attacker's sessions were
+        // DELETEd and took their `ip_address` and `user_agent` with them.
+        after: async (session, context) => {
+          emitSessionCreated(session, context);
+        },
+      },
+
+      delete: {
+        // Fires once per deleted row for single deletes (sign-out) and for
+        // bulk deletes alike — verified against better-auth 1.6.23's
+        // `deleteWithHooks` / `deleteManyWithHooks`, which loop the `after`
+        // hook over every entity they removed.
+        //
+        // NOTE ON COVERAGE: this covers session deletions that go THROUGH
+        // better-auth. The admin `users.revokeAccess` and `users.delete`
+        // paths tear down session rows with drizzle directly and never reach
+        // this hook; they emit `user.access.revoked` / `user.delete` from
+        // `users.impl.ts` instead. Between the two, every path that destroys
+        // a session today is recorded somewhere — a new teardown that uses
+        // neither would be silent.
+        after: async (session, context) => {
+          emitSessionRevoked(session, context);
+        },
       },
     },
   },
-  // Add middleware to check basic auth setting
-  middleware: [
-    {
-      path: "/sign-in/email",
-      middleware: createBasicAuthCheckMiddleware(),
-    },
-    {
-      path: "/sign-up/email",
-      middleware: createBasicAuthCheckMiddleware(),
-    },
-    {
-      path: "/forgot-password",
-      middleware: createBasicAuthCheckMiddleware(),
-    },
-    {
-      path: "/reset-password",
-      middleware: createBasicAuthCheckMiddleware(),
-    },
-  ],
+  // Enforce DISABLE_BASIC_AUTH on the credential paths. `hooks.before` is the
+  // request middleware better-auth 1.6.23 actually runs; the removed top-level
+  // `middleware` array was never a supported option and did nothing.
+  hooks: {
+    before: basicAuthEnforcementHook,
+  },
 });
 
 console.log("✓ Better Auth instance created successfully");

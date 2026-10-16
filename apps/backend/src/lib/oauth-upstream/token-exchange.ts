@@ -311,6 +311,49 @@ export function resolveTokenEndpoint(args: {
   return new URL("/token", args.serverUrl).toString();
 }
 
+function nonEmptyString(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+// The `issuer` stamp for tokens this server-side path persists.
+//
+// MCP SDK 1.31 `auth()` stamps everything it stores with `issuer` =
+// `String(authorizationServerUrl)` (the authorization server it discovered,
+// NOT the metadata's `issuer` field), and the frontend provider
+// (apps/frontend/lib/oauth-provider.ts) withholds any refresh token without a
+// stamp. The exchange and refresh here bypass the SDK, so they stamp what the
+// SDK would have:
+//   1. The stamp already on the stored tokens (a refresh is answered by the
+//      authorization server that issued the refresh token).
+//   2. The stamp on the client registration: the browser SDK wrote it in the
+//      same flow, for the authorization server that issued the code.
+//   3. The SDK's legacy fallback when nothing is stamped, `new URL('/',
+//      serverUrl)` — also the base this module discovers against. Skipped when
+//      the client names its own token endpoint, since the authorization
+//      server behind it is unknown; the tokens then stay unstamped.
+export function resolveIssuerStamp(args: {
+  tokens: Record<string, unknown> | null | undefined;
+  clientInformation: Record<string, unknown> | null | undefined;
+  serverUrl: string;
+}): string | undefined {
+  const stamped =
+    nonEmptyString(args.tokens?.issuer) ??
+    nonEmptyString(args.clientInformation?.issuer);
+  if (stamped) return stamped;
+  if (nonEmptyString(args.clientInformation?.token_endpoint)) return undefined;
+  return String(new URL("/", args.serverUrl));
+}
+
+// Apply the stamp, replacing anything the token response carried: the SDK
+// parses token responses without `issuer`, only the client sets it.
+export function stampIssuer(
+  tokens: OAuthTokens,
+  issuer: string | undefined,
+): OAuthTokens {
+  const { issuer: _fromResponse, ...rest } = tokens;
+  return issuer ? { ...rest, issuer } : rest;
+}
+
 // Pick the token endpoint auth method, honoring (in order):
 //   1. Explicit value on client_information
 //   2. Server's declared supported methods (prefer `none` for PKCE, then

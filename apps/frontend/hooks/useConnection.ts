@@ -69,7 +69,6 @@ interface UseConnectionOptions {
   command: string;
   args: string;
   url: string;
-  env: Record<string, string>;
   bearerToken?: string;
   headerName?: string;
   onNotification?: (notification: Notification) => void;
@@ -89,7 +88,6 @@ export function useConnection({
   command,
   args,
   url,
-  env,
   bearerToken,
   headerName,
   onNotification,
@@ -128,7 +126,7 @@ export function useConnection({
       enabled: enabled,
     });
 
-  const pushHistory = useMemoizedFn((request: object, response?: object) => {
+  const pushHistory = useMemoizedFn((request: object, response?: unknown) => {
     setRequestHistory((prev) => [
       ...prev,
       {
@@ -138,6 +136,11 @@ export function useConnection({
     ]);
   });
 
+  // useMemoizedFn (ahooks) erases the generic <T> from the wrapped function's
+  // type, collapsing makeRequest's return to Promise<unknown> and breaking
+  // schema-inferred call sites (zod 4 tightened output<T> from any to
+  // unknown). The memoized function's runtime behavior is unchanged, so we
+  // cast back to the real generic signature it implements.
   const makeRequest = useMemoizedFn(
     async <T extends AnySchema>(
       request: ClientRequest,
@@ -201,7 +204,7 @@ export function useConnection({
         throw e;
       }
     },
-  );
+  ) as MakeRequestFn;
 
   const handleCompletion = useMemoizedFn(
     async (
@@ -290,15 +293,15 @@ export function useConnection({
   const is401Error = useMemoizedFn((error: unknown): boolean => {
     return Boolean(
       (error instanceof SseError && error.code === 401) ||
-      (error instanceof Error && error.message.includes("401")) ||
-      (error instanceof Error && error.message.includes("Unauthorized")) ||
-      // Handle fetch errors that might come from streamable HTTP
-      (error instanceof TypeError && error.message.includes("401")) ||
-      // Handle response errors
-      (error &&
-        typeof error === "object" &&
-        "status" in error &&
-        (error as { status: number }).status === 401),
+        (error instanceof Error && error.message.includes("401")) ||
+        (error instanceof Error && error.message.includes("Unauthorized")) ||
+        // Handle fetch errors that might come from streamable HTTP
+        (error instanceof TypeError && error.message.includes("401")) ||
+        // Handle response errors
+        (error &&
+          typeof error === "object" &&
+          "status" in error &&
+          (error as { status: number }).status === 401),
     );
   });
 
@@ -427,9 +430,19 @@ export function useConnection({
                 `/mcp-proxy/server/stdio`,
                 getAppUrl(),
               );
+              // The proxy spawns what the `mcp_servers` row says and nothing
+              // else, so the uuid is the only parameter it needs. `command`
+              // and `args` are still sent because the backend falls back to
+              // matching them against a registered row when no uuid arrives
+              // (an older bundle in a still-open tab). `env` is deliberately
+              // NOT sent: it is ignored on arrival and it carries this
+              // server's secrets through a query string.
+              mcpProxyServerUrl.searchParams.append(
+                "mcpServerUuid",
+                mcpServerUuid,
+              );
               mcpProxyServerUrl.searchParams.append("command", command);
               mcpProxyServerUrl.searchParams.append("args", args);
-              mcpProxyServerUrl.searchParams.append("env", JSON.stringify(env));
               transportOptions = {
                 authProvider: authProvider,
                 eventSourceInit: {

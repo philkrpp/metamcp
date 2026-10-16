@@ -18,6 +18,10 @@ export class EndpointsRepository {
         description: input.description,
         namespace_uuid: input.namespace_uuid,
         enable_api_key_auth: input.enable_api_key_auth ?? true,
+        require_scoped_api_key: input.require_scoped_api_key ?? false,
+        // Persisted here so an endpoint can be created already-restricted; the
+        // create handler forces require_scoped_api_key on alongside it.
+        restricted: input.restricted ?? false,
         enable_max_rate: input.enable_max_rate ?? false,
         enable_client_max_rate: input.enable_client_max_rate ?? false,
         max_rate: input.max_rate,
@@ -48,6 +52,7 @@ export class EndpointsRepository {
         description: endpointsTable.description,
         namespace_uuid: endpointsTable.namespace_uuid,
         enable_api_key_auth: endpointsTable.enable_api_key_auth,
+        require_scoped_api_key: endpointsTable.require_scoped_api_key,
         enable_oauth: endpointsTable.enable_oauth,
         enable_max_rate: endpointsTable.enable_max_rate,
         enable_client_max_rate: endpointsTable.enable_client_max_rate,
@@ -60,6 +65,7 @@ export class EndpointsRepository {
           endpointsTable.client_max_rate_strategy_key,
         use_query_param_auth: endpointsTable.use_query_param_auth,
         enable_metamcp_admin_tools: endpointsTable.enable_metamcp_admin_tools,
+        restricted: endpointsTable.restricted,
         created_at: endpointsTable.created_at,
         updated_at: endpointsTable.updated_at,
         user_id: endpointsTable.user_id,
@@ -77,6 +83,7 @@ export class EndpointsRepository {
         description: endpointsTable.description,
         namespace_uuid: endpointsTable.namespace_uuid,
         enable_api_key_auth: endpointsTable.enable_api_key_auth,
+        require_scoped_api_key: endpointsTable.require_scoped_api_key,
         enable_oauth: endpointsTable.enable_oauth,
         enable_max_rate: endpointsTable.enable_max_rate,
         enable_client_max_rate: endpointsTable.enable_client_max_rate,
@@ -89,6 +96,7 @@ export class EndpointsRepository {
           endpointsTable.client_max_rate_strategy_key,
         use_query_param_auth: endpointsTable.use_query_param_auth,
         enable_metamcp_admin_tools: endpointsTable.enable_metamcp_admin_tools,
+        restricted: endpointsTable.restricted,
         created_at: endpointsTable.created_at,
         updated_at: endpointsTable.updated_at,
         user_id: endpointsTable.user_id,
@@ -115,6 +123,7 @@ export class EndpointsRepository {
         description: endpointsTable.description,
         namespace_uuid: endpointsTable.namespace_uuid,
         enable_api_key_auth: endpointsTable.enable_api_key_auth,
+        require_scoped_api_key: endpointsTable.require_scoped_api_key,
         enable_oauth: endpointsTable.enable_oauth,
         enable_max_rate: endpointsTable.enable_max_rate,
         enable_client_max_rate: endpointsTable.enable_client_max_rate,
@@ -127,6 +136,7 @@ export class EndpointsRepository {
           endpointsTable.client_max_rate_strategy_key,
         use_query_param_auth: endpointsTable.use_query_param_auth,
         enable_metamcp_admin_tools: endpointsTable.enable_metamcp_admin_tools,
+        restricted: endpointsTable.restricted,
         created_at: endpointsTable.created_at,
         updated_at: endpointsTable.updated_at,
         user_id: endpointsTable.user_id,
@@ -138,6 +148,7 @@ export class EndpointsRepository {
           created_at: namespacesTable.created_at,
           updated_at: namespacesTable.updated_at,
           user_id: namespacesTable.user_id,
+          tool_policy: namespacesTable.tool_policy,
         },
       })
       .from(endpointsTable)
@@ -165,6 +176,7 @@ export class EndpointsRepository {
         description: endpointsTable.description,
         namespace_uuid: endpointsTable.namespace_uuid,
         enable_api_key_auth: endpointsTable.enable_api_key_auth,
+        require_scoped_api_key: endpointsTable.require_scoped_api_key,
         enable_oauth: endpointsTable.enable_oauth,
         enable_max_rate: endpointsTable.enable_max_rate,
         enable_client_max_rate: endpointsTable.enable_client_max_rate,
@@ -177,6 +189,7 @@ export class EndpointsRepository {
           endpointsTable.client_max_rate_strategy_key,
         use_query_param_auth: endpointsTable.use_query_param_auth,
         enable_metamcp_admin_tools: endpointsTable.enable_metamcp_admin_tools,
+        restricted: endpointsTable.restricted,
         created_at: endpointsTable.created_at,
         updated_at: endpointsTable.updated_at,
         user_id: endpointsTable.user_id,
@@ -195,6 +208,7 @@ export class EndpointsRepository {
         description: endpointsTable.description,
         namespace_uuid: endpointsTable.namespace_uuid,
         enable_api_key_auth: endpointsTable.enable_api_key_auth,
+        require_scoped_api_key: endpointsTable.require_scoped_api_key,
         enable_oauth: endpointsTable.enable_oauth,
         enable_max_rate: endpointsTable.enable_max_rate,
         enable_client_max_rate: endpointsTable.enable_client_max_rate,
@@ -207,6 +221,7 @@ export class EndpointsRepository {
           endpointsTable.client_max_rate_strategy_key,
         use_query_param_auth: endpointsTable.use_query_param_auth,
         enable_metamcp_admin_tools: endpointsTable.enable_metamcp_admin_tools,
+        restricted: endpointsTable.restricted,
         created_at: endpointsTable.created_at,
         updated_at: endpointsTable.updated_at,
         user_id: endpointsTable.user_id,
@@ -225,6 +240,7 @@ export class EndpointsRepository {
         description: endpointsTable.description,
         namespace_uuid: endpointsTable.namespace_uuid,
         enable_api_key_auth: endpointsTable.enable_api_key_auth,
+        require_scoped_api_key: endpointsTable.require_scoped_api_key,
         enable_oauth: endpointsTable.enable_oauth,
         enable_max_rate: endpointsTable.enable_max_rate,
         enable_client_max_rate: endpointsTable.enable_client_max_rate,
@@ -237,6 +253,7 @@ export class EndpointsRepository {
           endpointsTable.client_max_rate_strategy_key,
         use_query_param_auth: endpointsTable.use_query_param_auth,
         enable_metamcp_admin_tools: endpointsTable.enable_metamcp_admin_tools,
+        restricted: endpointsTable.restricted,
         created_at: endpointsTable.created_at,
         updated_at: endpointsTable.updated_at,
         user_id: endpointsTable.user_id,
@@ -248,6 +265,7 @@ export class EndpointsRepository {
           created_at: namespacesTable.created_at,
           updated_at: namespacesTable.updated_at,
           user_id: namespacesTable.user_id,
+          tool_policy: namespacesTable.tool_policy,
         },
       })
       .from(endpointsTable)
@@ -268,6 +286,7 @@ export class EndpointsRepository {
         description: endpointsTable.description,
         namespace_uuid: endpointsTable.namespace_uuid,
         enable_api_key_auth: endpointsTable.enable_api_key_auth,
+        require_scoped_api_key: endpointsTable.require_scoped_api_key,
         enable_oauth: endpointsTable.enable_oauth,
         enable_max_rate: endpointsTable.enable_max_rate,
         enable_client_max_rate: endpointsTable.enable_client_max_rate,
@@ -280,6 +299,7 @@ export class EndpointsRepository {
           endpointsTable.client_max_rate_strategy_key,
         use_query_param_auth: endpointsTable.use_query_param_auth,
         enable_metamcp_admin_tools: endpointsTable.enable_metamcp_admin_tools,
+        restricted: endpointsTable.restricted,
         created_at: endpointsTable.created_at,
         updated_at: endpointsTable.updated_at,
         user_id: endpointsTable.user_id,
@@ -301,6 +321,7 @@ export class EndpointsRepository {
         description: endpointsTable.description,
         namespace_uuid: endpointsTable.namespace_uuid,
         enable_api_key_auth: endpointsTable.enable_api_key_auth,
+        require_scoped_api_key: endpointsTable.require_scoped_api_key,
         enable_oauth: endpointsTable.enable_oauth,
         enable_max_rate: endpointsTable.enable_max_rate,
         enable_client_max_rate: endpointsTable.enable_client_max_rate,
@@ -313,6 +334,7 @@ export class EndpointsRepository {
           endpointsTable.client_max_rate_strategy_key,
         use_query_param_auth: endpointsTable.use_query_param_auth,
         enable_metamcp_admin_tools: endpointsTable.enable_metamcp_admin_tools,
+        restricted: endpointsTable.restricted,
         created_at: endpointsTable.created_at,
         updated_at: endpointsTable.updated_at,
         user_id: endpointsTable.user_id,
@@ -324,6 +346,7 @@ export class EndpointsRepository {
           created_at: namespacesTable.created_at,
           updated_at: namespacesTable.updated_at,
           user_id: namespacesTable.user_id,
+          tool_policy: namespacesTable.tool_policy,
         },
       })
       .from(endpointsTable)
@@ -344,6 +367,7 @@ export class EndpointsRepository {
         description: endpointsTable.description,
         namespace_uuid: endpointsTable.namespace_uuid,
         enable_api_key_auth: endpointsTable.enable_api_key_auth,
+        require_scoped_api_key: endpointsTable.require_scoped_api_key,
         enable_oauth: endpointsTable.enable_oauth,
         enable_max_rate: endpointsTable.enable_max_rate,
         enable_client_max_rate: endpointsTable.enable_client_max_rate,
@@ -356,6 +380,7 @@ export class EndpointsRepository {
           endpointsTable.client_max_rate_strategy_key,
         use_query_param_auth: endpointsTable.use_query_param_auth,
         enable_metamcp_admin_tools: endpointsTable.enable_metamcp_admin_tools,
+        restricted: endpointsTable.restricted,
         created_at: endpointsTable.created_at,
         updated_at: endpointsTable.updated_at,
         user_id: endpointsTable.user_id,
@@ -364,6 +389,31 @@ export class EndpointsRepository {
       .where(eq(endpointsTable.name, name));
 
     return endpoint;
+  }
+
+  /**
+   * Does this deployment have ANY OAuth-enabled endpoint?
+   *
+   * Backs the unscoped `/.well-known/oauth-*` discovery documents (upstream
+   * issue #277): those carry no endpoint in their path, so the only honest
+   * question they can answer is whether this gateway runs an OAuth
+   * authorization server at all. A deployment where every endpoint is
+   * API-key-only must not advertise one — Claude Code ≥ v2.1.85 does RFC 9728
+   * discovery before connecting and abandons its configured bearer token the
+   * moment it finds OAuth metadata.
+   *
+   * `limit(1)` and a single projected column because this runs on an
+   * unauthenticated public route; `findAll()` would drag every row and every
+   * column back for a boolean.
+   */
+  async hasOAuthEnabledEndpoint(): Promise<boolean> {
+    const [row] = await db
+      .select({ uuid: endpointsTable.uuid })
+      .from(endpointsTable)
+      .where(eq(endpointsTable.enable_oauth, true))
+      .limit(1);
+
+    return Boolean(row);
   }
 
   // Find endpoint by name within user scope (for uniqueness checks)
@@ -378,6 +428,7 @@ export class EndpointsRepository {
         description: endpointsTable.description,
         namespace_uuid: endpointsTable.namespace_uuid,
         enable_api_key_auth: endpointsTable.enable_api_key_auth,
+        require_scoped_api_key: endpointsTable.require_scoped_api_key,
         enable_oauth: endpointsTable.enable_oauth,
         enable_max_rate: endpointsTable.enable_max_rate,
         enable_client_max_rate: endpointsTable.enable_client_max_rate,
@@ -390,6 +441,7 @@ export class EndpointsRepository {
           endpointsTable.client_max_rate_strategy_key,
         use_query_param_auth: endpointsTable.use_query_param_auth,
         enable_metamcp_admin_tools: endpointsTable.enable_metamcp_admin_tools,
+        restricted: endpointsTable.restricted,
         created_at: endpointsTable.created_at,
         updated_at: endpointsTable.updated_at,
         user_id: endpointsTable.user_id,
@@ -425,6 +477,7 @@ export class EndpointsRepository {
         description: input.description,
         namespace_uuid: input.namespace_uuid,
         enable_api_key_auth: input.enable_api_key_auth,
+        require_scoped_api_key: input.require_scoped_api_key,
         enable_oauth: input.enable_oauth,
         enable_max_rate: input.enable_max_rate,
         enable_client_max_rate: input.enable_client_max_rate,

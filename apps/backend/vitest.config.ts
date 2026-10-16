@@ -14,6 +14,12 @@ export default defineConfig({
   test: {
     globals: true,
     environment: "node",
+    env: {
+      // The umbrella suites pin CF-Connecting-IP attribution end to end
+      // through auditContextMiddleware; run them under that source. The
+      // per-source behaviour is covered explicitly in lib/client-ip.test.ts.
+      CLIENT_IP_SOURCE: "cf",
+    },
     coverage: {
       provider: "v8",
       reporter: ["text", "json", "html"],

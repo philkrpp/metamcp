@@ -11,6 +11,7 @@ import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 
+import { EndpointAccessSection } from "@/components/endpoint-access-section";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -115,6 +116,7 @@ export function EditEndpoint({
       description: "",
       namespaceUuid: "",
       enableApiKeyAuth: true,
+      requireScopedApiKey: false,
       enableMaxRate: false,
       enableClientMaxRate: false,
       maxRate: undefined,
@@ -123,7 +125,7 @@ export function EditEndpoint({
       clientMaxRateSeconds: undefined,
       clientMaxRateStrategy: "ip",
       clientMaxRateStrategyKey: "",
-      enableOauth: false,
+      enableOauth: true,
       useQueryParamAuth: false,
       enableMetamcpAdminTools: false,
     },
@@ -137,6 +139,7 @@ export function EditEndpoint({
         description: endpoint.description || "",
         namespaceUuid: endpoint.namespace.uuid,
         enableApiKeyAuth: endpoint.enable_api_key_auth ?? true,
+        requireScopedApiKey: endpoint.require_scoped_api_key ?? false,
         enableMaxRate: endpoint.enableMaxRate,
         enableClientMaxRate: endpoint.enableClientMaxRate,
         maxRate: endpoint.maxRate,
@@ -178,6 +181,7 @@ export function EditEndpoint({
         description: data.description,
         namespaceUuid: data.namespaceUuid,
         enableApiKeyAuth: data.enableApiKeyAuth,
+        requireScopedApiKey: data.requireScopedApiKey,
         enableMaxRate: data.enableMaxRate,
         enableClientMaxRate: data.enableClientMaxRate,
         maxRate: data.maxRate,
@@ -209,7 +213,8 @@ export function EditEndpoint({
       description: "",
       namespaceUuid: "",
       enableApiKeyAuth: true,
-      enableOauth: false,
+      requireScopedApiKey: false,
+      enableOauth: true,
       useQueryParamAuth: false,
     });
     setSelectedNamespaceUuid("");
@@ -342,9 +347,14 @@ export function EditEndpoint({
                 </div>
                 <Switch
                   checked={editForm.watch("enableMaxRate")}
-                  onCheckedChange={(checked) =>
-                    editForm.setValue("enableMaxRate", checked)
-                  }
+                  onCheckedChange={(checked) => {
+                    editForm.setValue("enableMaxRate", checked);
+                    if (!checked) {
+                      editForm.setValue("maxRate", undefined);
+                      editForm.setValue("maxRateSeconds", undefined);
+                      editForm.clearErrors(["maxRate", "maxRateSeconds"]);
+                    }
+                  }}
                   disabled={isUpdating}
                 />
               </div>
@@ -406,9 +416,17 @@ export function EditEndpoint({
                 </div>
                 <Switch
                   checked={editForm.watch("enableClientMaxRate")}
-                  onCheckedChange={(checked) =>
-                    editForm.setValue("enableClientMaxRate", checked)
-                  }
+                  onCheckedChange={(checked) => {
+                    editForm.setValue("enableClientMaxRate", checked);
+                    if (!checked) {
+                      editForm.setValue("clientMaxRate", undefined);
+                      editForm.setValue("clientMaxRateSeconds", undefined);
+                      editForm.clearErrors([
+                        "clientMaxRate",
+                        "clientMaxRateSeconds",
+                      ]);
+                    }
+                  }}
                   disabled={isUpdating}
                 />
               </div>
@@ -576,6 +594,28 @@ export function EditEndpoint({
                 />
               </div>
 
+              {/* Require endpoint-scoped keys (opt out of legacy
+                  gateway-wide keys on this endpoint) */}
+              {editForm.watch("enableApiKeyAuth") && (
+                <div className="flex items-center justify-between">
+                  <div className="space-y-0.5">
+                    <label className="text-sm font-medium">
+                      {t("endpoints:edit.requireScopedApiKeyLabel")}
+                    </label>
+                    <p className="text-xs text-muted-foreground">
+                      {t("endpoints:edit.requireScopedApiKeyDescription")}
+                    </p>
+                  </div>
+                  <Switch
+                    checked={editForm.watch("requireScopedApiKey")}
+                    onCheckedChange={(checked) =>
+                      editForm.setValue("requireScopedApiKey", checked)
+                    }
+                    disabled={isUpdating}
+                  />
+                </div>
+              )}
+
               {/* Query Parameter Auth */}
               {editForm.watch("enableApiKeyAuth") && (
                 <div className="flex items-center justify-between">
@@ -659,6 +699,12 @@ export function EditEndpoint({
                 />
               </div>
             </div>
+
+            {/* Access groups (migration 0033). Rendered only for an endpoint
+                that already exists, and only for an administrator — the section
+                writes through its own mutation rather than this form, so there
+                is nothing for it to do on a record that has no uuid yet. */}
+            {endpoint && <EndpointAccessSection endpointUuid={endpoint.uuid} />}
           </div>
 
           <DialogFooter>

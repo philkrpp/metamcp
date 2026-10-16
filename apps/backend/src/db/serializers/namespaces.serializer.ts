@@ -16,6 +16,7 @@ export class NamespacesSerializer {
       created_at: dbNamespace.created_at.toISOString(),
       updated_at: dbNamespace.updated_at.toISOString(),
       user_id: dbNamespace.user_id,
+      tool_policy: dbNamespace.tool_policy,
     };
   }
 
@@ -25,8 +26,24 @@ export class NamespacesSerializer {
     return dbNamespaces.map(this.serializeNamespace);
   }
 
+  /**
+   * `includeSecrets` carries the same contract as
+   * McpServersSerializer.serializeMcpServer — required, no default — because
+   * the embedded server objects are the SAME disclosure surface by another
+   * route. `namespaces.get` is protectedProcedure, so redacting only the
+   * mcpServers router would have left `env`, `bearerToken`, `headers`,
+   * `command`, `args` and the internal `url` reachable to any member who
+   * asked for the namespace that contains the server.
+   *
+   * The embed is hand-rolled here (rather than delegating to
+   * McpServersSerializer) because NamespaceServer adds the per-namespace
+   * `status` field and coalesces nullable columns; that predates this change
+   * and is left alone. The redaction set is kept identical to the sibling
+   * serializer's on purpose — if one grows a field, so must the other.
+   */
   static serializeNamespaceWithServers(
     dbNamespace: DatabaseNamespaceWithServers,
+    includeSecrets: boolean,
   ): NamespaceWithServers {
     return {
       uuid: dbNamespace.uuid,
@@ -35,18 +52,23 @@ export class NamespacesSerializer {
       created_at: dbNamespace.created_at.toISOString(),
       updated_at: dbNamespace.updated_at.toISOString(),
       user_id: dbNamespace.user_id,
+      tool_policy: dbNamespace.tool_policy,
       servers: dbNamespace.servers.map((server) => ({
         uuid: server.uuid,
         name: server.name,
         description: server.description,
         type: server.type,
-        command: server.command,
-        args: server.args || [],
-        url: server.url,
-        env: server.env || {},
-        bearerToken: server.bearerToken,
-        headers: server.headers || {},
-        forward_headers: server.forward_headers || {},
+        command: includeSecrets ? server.command : null,
+        args: includeSecrets ? server.args || [] : [],
+        url: includeSecrets ? server.url : null,
+        env: includeSecrets ? server.env || {} : {},
+        // NEVER returned: the stored value is an
+        // `enc:v1:` ciphertext read only server-side to build the upstream
+        // header, so no response echoes it, same posture as
+        // McpServersSerializer.
+        bearerToken: null,
+        headers: includeSecrets ? server.headers || {} : {},
+        forward_headers: includeSecrets ? server.forward_headers || {} : {},
         error_status: server.error_status,
         created_at: server.created_at.toISOString(),
         user_id: server.user_id,

@@ -24,8 +24,10 @@ import {
   exchangeAuthorizationCode,
   OAuthTokens,
   redactToken,
+  resolveIssuerStamp,
   resolveTokenEndpoint,
   resolveTokenEndpointAuthMethod,
+  stampIssuer,
   UpstreamTokenError,
 } from "../lib/oauth-upstream/token-exchange";
 
@@ -334,6 +336,13 @@ export const oauthImplementations = {
       );
       throw error;
     }
+
+    // Bind the tokens to their authorization server the way the SDK would,
+    // so the frontend provider does not withhold the refresh token.
+    tokens = stampIssuer(
+      tokens,
+      resolveIssuerStamp({ tokens: null, clientInformation, serverUrl }),
+    );
 
     await oauthSessionsRepository.upsert({
       mcp_server_uuid: input.mcp_server_uuid,
