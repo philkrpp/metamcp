@@ -16,6 +16,10 @@ import { extractClientHeaders } from "../../lib/metamcp/header-forwarding";
 import { MetaMCPHandlerContext } from "../../lib/metamcp/metamcp-middleware/functional-middleware";
 import { metaMcpServerPool } from "../../lib/metamcp/metamcp-server-pool";
 import { SessionLifetimeManagerImpl } from "../../lib/session-lifetime-manager";
+import {
+  buildSessionHealthPayload,
+  buildSessionNotFoundBody,
+} from "./session-responses";
 
 const streamableHttpRouter = express.Router();
 
@@ -102,18 +106,12 @@ const cleanupSession = async (
 
 // Health check endpoint to monitor sessions
 streamableHttpRouter.get("/health/sessions", (req, res) => {
-  const sessionIds = sessionManager.getSessionIds();
-  const poolStatus = metaMcpServerPool.getPoolStatus();
-
-  res.json({
-    timestamp: new Date().toISOString(),
-    streamableHttpSessions: {
-      count: sessionIds.length,
-      sessionIds: sessionIds,
-    },
-    metaMcpPoolStatus: poolStatus,
-    totalActiveSessions: sessionIds.length + poolStatus.active,
-  });
+  res.json(
+    buildSessionHealthPayload(
+      sessionManager.getSessionIds().length,
+      metaMcpServerPool.getPoolStatus(),
+    ),
+  );
 });
 
 streamableHttpRouter.get(
@@ -282,12 +280,7 @@ streamableHttpRouter.post(
             `Transport not found for sessionId ${sessionId}. Available sessions:`,
             sessionManager.getSessionIds(),
           );
-          res.status(404).json({
-            error: "Session not found",
-            message: `Transport not found for sessionId ${sessionId}`,
-            available_sessions: sessionManager.getSessionIds(),
-            timestamp: new Date().toISOString(),
-          });
+          res.status(404).json(buildSessionNotFoundBody());
         } else {
           logger.info(`Found session ${sessionId}, handling request`);
           normalizeStreamableHttpAcceptHeader(req);
@@ -346,7 +339,6 @@ streamableHttpRouter.delete(
         res.status(200).json({
           message: "Session cleaned up successfully",
           sessionId: sessionId,
-          remainingSessions: sessionManager.getSessionIds(),
         });
       } catch (error) {
         logger.error("Error in public endpoint /mcp DELETE route:", error);
