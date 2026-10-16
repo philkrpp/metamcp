@@ -11,7 +11,12 @@ function contextFor(endpoint: Record<string, unknown>) {
   return { req: { endpoint: { user_id: "u1", ...endpoint } } };
 }
 
-const NS1 = { namespace_uuid: "ns1", max_rate: 2, max_rate_seconds: 60 };
+const NS1 = {
+  uuid: "ep1",
+  namespace_uuid: "ns1",
+  max_rate: 2,
+  max_rate_seconds: 60,
+};
 
 describe("RateLimiting (token bucket)", () => {
   let limiting: RateLimiting;
@@ -72,11 +77,31 @@ describe("RateLimiting (token bucket)", () => {
     }
   });
 
-  it("keeps separate buckets per namespace", async () => {
-    const ns2 = { ...NS1, namespace_uuid: "ns2" };
+  it("keeps separate buckets per endpoint", async () => {
+    const ep2 = { ...NS1, uuid: "ep2", namespace_uuid: "ns2" };
     await limiting.onRequest(contextFor(NS1), next);
     await limiting.onRequest(contextFor(NS1), next);
 
-    await expect(limiting.onRequest(contextFor(ns2), next)).resolves.toBe("ok");
+    await expect(limiting.onRequest(contextFor(ep2), next)).resolves.toBe("ok");
+  });
+
+  it("keeps separate buckets for endpoints sharing a namespace", async () => {
+    const sameNamespace = { ...NS1, uuid: "ep2" };
+    await limiting.onRequest(contextFor(NS1), next);
+    await limiting.onRequest(contextFor(NS1), next);
+
+    await expect(
+      limiting.onRequest(contextFor(sameNamespace), next),
+    ).resolves.toBe("ok");
+  });
+
+  it("applies a changed max_rate immediately", async () => {
+    await limiting.onRequest(contextFor(NS1), next);
+    await limiting.onRequest(contextFor(NS1), next);
+
+    const raised = { ...NS1, max_rate: 5 };
+    await expect(limiting.onRequest(contextFor(raised), next)).resolves.toBe(
+      "ok",
+    );
   });
 });

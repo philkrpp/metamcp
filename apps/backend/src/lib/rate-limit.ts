@@ -100,7 +100,6 @@ export class RateLimiting {
 
   async onRequest(context: Context, callNext: CallNext): Promise<unknown> {
     const { endpoint } = context.req;
-    const { namespace_uuid } = endpoint;
     const maxRate = endpoint.max_rate ?? 0;
     const maxRateSeconds = endpoint.max_rate_seconds ?? 0;
 
@@ -108,10 +107,13 @@ export class RateLimiting {
       return callNext(context);
     }
 
-    let limiter = this.limiters.get(namespace_uuid);
+    // One bucket per endpoint and config: endpoints may share a namespace,
+    // and an edited limit must apply without waiting for idle cleanup.
+    const key = `${endpoint.uuid}:${maxRate}:${maxRateSeconds}`;
+    let limiter = this.limiters.get(key);
     if (!limiter) {
       limiter = new TokenBucketRateLimiter(maxRate, maxRate / maxRateSeconds);
-      this.limiters.set(namespace_uuid, limiter);
+      this.limiters.set(key, limiter);
     }
 
     if (!limiter.consume()) {
