@@ -107,6 +107,7 @@ import {
   clearAdminToolsContext,
   setAdminToolsContext,
 } from "../admin-mcp/admin-session-context";
+import { setAuditRecorderForTesting } from "./metamcp-middleware/auditing.functional";
 import { createServer } from "./metamcp-proxy";
 
 const SESSION_ID = "sess-admin";
@@ -239,5 +240,62 @@ describe("endpoint admin-tools toggle on an existing session", () => {
       ),
     ).rejects.toThrow(/Access denied to MetaMCP admin tool/);
     expect(executeAdminToolMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("admin tool calls in the tool-call audit trail", () => {
+  const rows: Array<Record<string, unknown>> = [];
+
+  beforeEach(() => {
+    rows.length = 0;
+    setAuditRecorderForTesting(async (entry) => {
+      rows.push(entry);
+    });
+  });
+
+  afterEach(() => {
+    setAuditRecorderForTesting(undefined);
+  });
+
+  // The recorder is fire-and-forget; let its promise chain settle.
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+  it("records one row per admin tool call with its outcome", async () => {
+    findEndpointMock.mockResolvedValue(endpointRow(true));
+    const consumer = await connectConsumer();
+
+    await consumer.request(
+      { method: "tools/call", params: { name: ADMIN_TOOL, arguments: {} } },
+      CallToolResultSchema,
+    );
+    await settle();
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      session_id: SESSION_ID,
+      server_name: "metamcp-admin",
+      tool_name: "list_endpoints",
+      success: true,
+    });
+  });
+
+  it("records a refused admin tool call as a failure", async () => {
+    findEndpointMock.mockResolvedValue(endpointRow(false));
+    const consumer = await connectConsumer();
+
+    await expect(
+      consumer.request(
+        { method: "tools/call", params: { name: ADMIN_TOOL, arguments: {} } },
+        CallToolResultSchema,
+      ),
+    ).rejects.toThrow(/Access denied/);
+    await settle();
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      server_name: "metamcp-admin",
+      tool_name: "list_endpoints",
+      success: false,
+    });
   });
 });
