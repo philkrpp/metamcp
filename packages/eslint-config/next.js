@@ -52,6 +52,15 @@ export const nextJsConfig = [
       ...pluginReactHooks.configs.recommended.rules,
       // React scope no longer necessary with new JSX transform.
       "react/react-in-jsx-scope": "off",
+      // eslint-plugin-react-hooks 7 enables React Compiler rules in
+      // `recommended`. These flag existing umbrella-owned components (36
+      // warnings at the 7.1.1 upgrade); rewriting them would conflict with
+      // upstream syncs, so they stay off until the umbrella adopts them.
+      "react-hooks/set-state-in-effect": "off",
+      "react-hooks/incompatible-library": "off",
+      "react-hooks/static-components": "off",
+      "react-hooks/purity": "off",
+      "react-hooks/immutability": "off",
     },
   },
 ];
