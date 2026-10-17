@@ -61,6 +61,7 @@ import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 
 import logger from "@/utils/logger";
 
+import { serverRequiresForwardedHeaders } from "./header-forwarding";
 import { isPingAnsweredError, McpServerPool } from "./mcp-server-pool";
 import { toolsSyncCache } from "./tools-sync-cache";
 
@@ -73,6 +74,7 @@ type FakeClient = {
   cleanup: ReturnType<typeof vi.fn>;
   closed: boolean;
   listChangedSubscribers: Set<() => void | Promise<void>>;
+  boundToSession?: boolean;
 };
 
 function makeFakeClient(): FakeClient {
@@ -1633,13 +1635,61 @@ describe("McpServerPool forward_headers servers are bound to one session", () =>
     connectMock = (await import("./client"))
       .connectMetaMcpClient as unknown as ReturnType<typeof vi.fn>;
     connectMock.mockReset();
-    connectMock.mockImplementation(async () => makeFakeClient());
+    // Like the real connectMetaMcpClient, stamp the binding at creation.
+    connectMock.mockImplementation(async (params: never) => {
+      const client = makeFakeClient();
+      client.boundToSession = serverRequiresForwardedHeaders(params);
+      return client;
+    });
   });
 
   afterEach(async () => {
     for (const p of pools.splice(0)) {
       await p.cleanupAll();
     }
+  });
+
+  const plainParams = (uuid: string) =>
+    ({
+      uuid,
+      name: `srv-${uuid}`,
+      type: "STREAMABLE_HTTP",
+      url: "http://backend.invalid/mcp",
+    }) as never;
+
+  // forward_headers turned off while a header-bound connection is live: the
+  // pool's params cache now says "shareable", the connection still carries
+  // the first caller's headers.
+  const turnOffForwarding = (pool: McpServerPool, uuid: string) => {
+    (
+      pool as unknown as { serverParamsCache: Record<string, unknown> }
+    ).serverParamsCache[uuid] = plainParams(uuid);
+  };
+
+  it("destroys a header-bound connection on cleanup even after forward_headers was turned off", async () => {
+    const pool = makePool();
+    const internals = pool as unknown as FwdInternals;
+
+    const client = (await pool.getSession(
+      "s1",
+      "A",
+      fwdParams("A"),
+    )) as unknown as FakeClient;
+    turnOffForwarding(pool, "A");
+    await pool.cleanupSession("s1");
+
+    expect(client.cleanup).toHaveBeenCalledTimes(1);
+    expect(internals.idleSessions["A"]).toBeUndefined();
+  });
+
+  it("does not lend a header-bound connection after forward_headers was turned off", async () => {
+    const pool = makePool(1);
+
+    const first = await pool.getSession("s1", "A", fwdParams("A", "key-1"));
+    const second = await pool.getSession("s2", "A", plainParams("A"));
+
+    expect(first).toBeDefined();
+    expect(second).not.toBe(first);
   });
 
   it("does not convert an idle connection for a forward_headers server", async () => {

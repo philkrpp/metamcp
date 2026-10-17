@@ -28,6 +28,7 @@ import { isUpstreamUnauthorizedError } from "../oauth-upstream/token-exchange";
 import { ProcessManagedStdioTransport } from "../stdio-transport/process-managed-transport";
 import { describeConnectError, formatConnectionAge } from "./connect-error";
 import { transformDockerEnv, transformDockerUrl } from "./docker-url";
+import { serverRequiresForwardedHeaders } from "./header-forwarding";
 import { metamcpLogStore } from "./log-store";
 import { resolveServerBearerToken } from "./server-bearer-crypto";
 import { serverErrorTracker } from "./server-error-tracker";
@@ -319,6 +320,14 @@ export interface ConnectedClient {
    * one itself.
    */
   listChangedSubscribers: Set<ListChangedSubscriber>;
+  /**
+   * True when this connection was built from params with `forward_headers`,
+   * i.e. it carries ONE caller's forwarded headers (often credentials). Fixed
+   * at creation: the pool must never idle, recycle or lend such a connection
+   * to another session, even after the server's `forward_headers` is later
+   * turned off and its cached params say the server is shareable.
+   */
+  boundToSession?: boolean;
 }
 
 // Re-exported for backwards compatibility with existing importers.
@@ -837,6 +846,7 @@ export const connectMetaMcpClient = async (
           }
         },
         listChangedSubscribers,
+        boundToSession: serverRequiresForwardedHeaders(serverParams),
       };
     } catch (error) {
       // Set the closing guard BEFORE the cleanup close below so an

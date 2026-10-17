@@ -492,7 +492,12 @@ export class McpServerPool {
     for (const [sessionId, sessionServers] of Object.entries(
       this.activeSessions,
     )) {
-      if (sessionServers[serverUuid]) {
+      // A connection bound to its session's forwarded headers is never lent,
+      // whatever the server's current params say.
+      if (
+        sessionServers[serverUuid] &&
+        !sessionServers[serverUuid].boundToSession
+      ) {
         const timestamp = this.sessionTimestamps[sessionId] || Infinity;
         if (timestamp < oldestTimestamp) {
           oldestTimestamp = timestamp;
@@ -1097,8 +1102,11 @@ export class McpServerPool {
           delete this.idleSessions[serverUuid];
         }
         borrowed++;
-      } else if (this.isPerSessionServer(this.serverParamsCache[serverUuid])) {
+      } else if (client.boundToSession) {
         // Bound to this session's forwarded headers: destroy, never recycle.
+        // Decided by the connection's own creation-time flag, not the live
+        // params cache, which a later edit (forward_headers turned off) or
+        // another session's getSession may already have overwritten.
         if (this.idleSessions[serverUuid] === client) {
           delete this.idleSessions[serverUuid];
         }

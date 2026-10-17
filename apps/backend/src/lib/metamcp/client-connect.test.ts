@@ -790,3 +790,37 @@ describe("ConnectedClient.cleanup — spec session termination", () => {
     expect(warnSpy).not.toHaveBeenCalled();
   });
 });
+
+describe("connectMetaMcpClient — session binding of forwarded-header connections", () => {
+  beforeEach(() => {
+    vi.spyOn(metamcpLogStore, "record").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const connectWith = async (serverParams: ServerParameters) => {
+    const client = makeFakeClient(async () => {});
+    const createClient = vi.fn(() => ({
+      client,
+      transport: makeFakeTransport(),
+    }));
+    return (await connectMetaMcpClient(serverParams, undefined, undefined, {
+      createClient,
+    })) as ConnectedClient;
+  };
+
+  it("marks a connection built with forward_headers as bound to its session", async () => {
+    const result = await connectWith({
+      ...params,
+      forward_headers: { "x-api-key": "X-Api-Key" },
+    } as unknown as ServerParameters);
+    expect(result.boundToSession).toBe(true);
+  });
+
+  it("leaves a connection without forward_headers shareable", async () => {
+    const result = await connectWith(params);
+    expect(result.boundToSession).toBe(false);
+  });
+});
