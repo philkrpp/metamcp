@@ -1183,9 +1183,10 @@ export const createServer = async (
       );
     }
 
+    // The aggregate is complete in one page: never advertise a nextCursor
+    // (echoing the request cursor made paginating clients loop forever).
     return {
       prompts: allPrompts,
-      nextCursor: request.params?.cursor,
     };
   });
 
@@ -1312,9 +1313,9 @@ export const createServer = async (
       );
     }
 
+    // Complete in one page; see prompts/list.
     return {
       resources: allResources,
-      nextCursor: request.params?.cursor,
     };
   });
 
@@ -1474,9 +1475,9 @@ export const createServer = async (
         );
       }
 
+      // Complete in one page; see prompts/list.
       return {
         resourceTemplates: allTemplates,
-        nextCursor: request.params?.cursor,
       };
     },
   );
