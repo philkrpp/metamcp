@@ -100,6 +100,13 @@ for _brand_key in PRODUCT_NAME ORG_NAME LOGO_PATH DESCRIPTION; do
 done
 unset _brand_key _public_var _alias_var _public_val _alias_val
 
+# Build commit for the sidebar version tooltip. Coolify sets SOURCE_COMMIT in
+# the running container even when it is kept out of the build (which keeps the
+# layer cache), so promote it here; a value baked in at build time wins.
+if [ -z "${NEXT_PUBLIC_APP_COMMIT:-}" ] && [ -n "${SOURCE_COMMIT:-}" ]; then
+    export NEXT_PUBLIC_APP_COMMIT="$SOURCE_COMMIT"
+fi
+
 # Set default values for postgres connection if not provided
 POSTGRES_HOST=${POSTGRES_HOST:-postgres}
 POSTGRES_PORT=${POSTGRES_PORT:-5432}
