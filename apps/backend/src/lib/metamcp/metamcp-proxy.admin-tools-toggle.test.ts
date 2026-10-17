@@ -122,9 +122,7 @@ async function backend(): Promise<ConnectedClient> {
     { capabilities: { tools: {} } },
   );
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
-    tools: [
-      { name: "kick", inputSchema: { type: "object", properties: {} } },
-    ],
+    tools: [{ name: "kick", inputSchema: { type: "object", properties: {} } }],
   }));
   const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
   await server.connect(serverSide);

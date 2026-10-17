@@ -36,9 +36,7 @@ vi.mock("./server-error-tracker", () => ({
 import { connectMetaMcpClient } from "./client";
 import { McpServerPool } from "./mcp-server-pool";
 
-const connectMock = connectMetaMcpClient as unknown as ReturnType<
-  typeof vi.fn
->;
+const connectMock = connectMetaMcpClient as unknown as ReturnType<typeof vi.fn>;
 
 const params = (uuid: string) =>
   ({

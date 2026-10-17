@@ -981,27 +981,27 @@ export const createServer = async (
   // Admin tools bypass the namespace chain (filters/overrides/retired names do
   // not apply to them) but not the audit trail: the same auditing middleware
   // records one tool_call row per admin call, refusals included.
-  const callAdminToolWithAuditing = createAuditingMiddleware()(
-    async (request) => {
-      const adminContext = getAdminToolsContext(handlerContext.sessionId);
-      if (
-        !adminContext?.enabled ||
-        !adminContext.userId ||
-        !(await isEndpointAdminToolsEnabled(adminContext.endpointUuid))
-      ) {
-        throw new Error(
-          `Access denied to MetaMCP admin tool: ${request.params.name}`,
-        );
-      }
-
-      const { executeAdminTool } = await loadAdminToolsRegistry();
-      return executeAdminTool(
-        request.params.name,
-        adminContext,
-        request.params.arguments,
+  const callAdminToolWithAuditing = createAuditingMiddleware()(async (
+    request,
+  ) => {
+    const adminContext = getAdminToolsContext(handlerContext.sessionId);
+    if (
+      !adminContext?.enabled ||
+      !adminContext.userId ||
+      !(await isEndpointAdminToolsEnabled(adminContext.endpointUuid))
+    ) {
+      throw new Error(
+        `Access denied to MetaMCP admin tool: ${request.params.name}`,
       );
-    },
-  );
+    }
+
+    const { executeAdminTool } = await loadAdminToolsRegistry();
+    return executeAdminTool(
+      request.params.name,
+      adminContext,
+      request.params.arguments,
+    );
+  });
 
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     if (request.params.name.startsWith(ADMIN_TOOL_NAME_PREFIX)) {
