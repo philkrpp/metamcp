@@ -193,12 +193,15 @@ function UserInfoFooter() {
   return (
     <SidebarFooter>
       <div className="flex flex-col gap-4 p-3">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col gap-2">
           <div className="flex items-center gap-3">
             <LanguageSwitcher />
             <ThemeToggle />
           </div>
-          <p className="text-xs text-muted-foreground" title={appVersion.title}>
+          <p
+            className="truncate font-mono text-xs text-muted-foreground"
+            title={appVersion.title}
+          >
             {appVersion.label}
           </p>
         </div>
