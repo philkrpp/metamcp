@@ -283,6 +283,42 @@ describe("allowlist: no row means INACTIVE", () => {
   );
 });
 
+describe("list: one tool-status query per listing, not one per tool", () => {
+  it.each([false, true])(
+    "judges N tools from a single mapping query (cache %s)",
+    async (cacheEnabled) => {
+      curate("allow_all", [
+        { tool: "a", status: "ACTIVE" },
+        { tool: "b", status: "INACTIVE" },
+        { tool: "c", status: "ACTIVE" },
+      ]);
+
+      expect(
+        await listNames(
+          ["srv__a", "srv__b", "srv__c", "srv__unmapped", "bare"],
+          cacheEnabled,
+        ),
+      ).toEqual(["bare", "srv__a", "srv__c", "srv__unmapped"]);
+
+      const mappingQueries = queries.filter((q) => q.table === "mappings");
+      expect(mappingQueries).toEqual([
+        { table: "mappings", where: { "ntm.namespace_uuid": NS } },
+      ]);
+    },
+  );
+
+  it("a listing fills the status cache, so a call right after needs no status query", async () => {
+    curate("allow_all", [{ tool: "mytool", status: "INACTIVE" }]);
+    expect(await listNames([TOOL_NAME], true)).toEqual([]);
+    queries.length = 0;
+
+    const { handler, text } = await callTool(TOOL_NAME, true);
+    expect(handler).not.toHaveBeenCalled();
+    expect(text).toBe(`Access denied to tool "${TOOL_NAME}": ${INACTIVE}`);
+    expect(queries.filter((q) => q.table === "mappings")).toEqual([]);
+  });
+});
+
 describe("fail closed (operator decision 2026-09-02)", () => {
   it("excludes and denies when the server prefix resolves to no mounted server", async () => {
     curate("allow_all");

@@ -241,6 +241,7 @@ async function judgeParsedTool(
   originalToolName: string,
   policy: NamespaceToolPolicy,
   useCache: boolean,
+  loadStatuses?: () => Promise<NamespaceToolStatuses>,
 ): Promise<{ served: true } | { served: false; reason: string }> {
   if (serverUuids.length === 0) {
     return { served: false, reason: "server could not be resolved" };
@@ -251,6 +252,7 @@ async function judgeParsedTool(
       originalToolName,
       serverUuid,
       useCache,
+      loadStatuses,
     );
     const verdict = judgeToolStatus(status, policy);
     if (!verdict.served) {
@@ -258,6 +260,45 @@ async function judgeParsedTool(
     }
   }
   return { served: true };
+}
+
+/** Every tool-mapping status of one namespace, keyed by toolStatusKey. */
+type NamespaceToolStatuses = Map<string, "ACTIVE" | "INACTIVE">;
+
+const toolStatusKey = (serverUuid: string, toolName: string): string =>
+  JSON.stringify([serverUuid, toolName]);
+
+/**
+ * Load the status of every tool mapping in the namespace in ONE query, so a
+ * listing judges all of its tools from it instead of querying once per tool.
+ * Same join and filters as the per-tool query in getToolStatus, minus the
+ * tool and server, which become the map key. Errors propagate (fail closed).
+ */
+async function loadNamespaceToolStatuses(
+  namespaceUuid: string,
+): Promise<NamespaceToolStatuses> {
+  const rows = await db
+    .select({
+      serverUuid: namespaceToolMappingsTable.mcp_server_uuid,
+      toolName: toolsTable.name,
+      status: namespaceToolMappingsTable.status,
+    })
+    .from(namespaceToolMappingsTable)
+    .innerJoin(
+      toolsTable,
+      eq(toolsTable.uuid, namespaceToolMappingsTable.tool_uuid),
+    )
+    .where(eq(namespaceToolMappingsTable.namespace_uuid, namespaceUuid));
+
+  const statuses: NamespaceToolStatuses = new Map();
+  for (const row of rows) {
+    const key = toolStatusKey(row.serverUuid, row.toolName);
+    // The per-tool query reads the first matching row; keep the first here too.
+    if (!statuses.has(key)) {
+      statuses.set(key, row.status);
+    }
+  }
+  return statuses;
 }
 
 /**
@@ -276,6 +317,7 @@ async function getToolStatus(
   toolName: string,
   serverUuid: string,
   useCache: boolean = true,
+  loadStatuses?: () => Promise<NamespaceToolStatuses>,
 ): Promise<"ACTIVE" | "INACTIVE" | null> {
   // Check cache first
   if (useCache) {
@@ -283,6 +325,16 @@ async function getToolStatus(
     if (cached !== null) {
       return cached;
     }
+  }
+
+  // A listing passes the namespace's statuses, loaded once for all its tools.
+  if (loadStatuses) {
+    const status =
+      (await loadStatuses()).get(toolStatusKey(serverUuid, toolName)) ?? null;
+    if (status && useCache) {
+      toolStatusCache.set(namespaceUuid, toolName, serverUuid, status);
+    }
+    return status;
   }
 
   // Query database for tool status
@@ -352,6 +404,15 @@ async function filterActiveTools(
     return lookup;
   };
 
+  // One status query per listing, made on the first cache miss and shared by
+  // every tool. A rejected load stays rejected, so each tool that needs it is
+  // excluded by its own catch below.
+  let statusesLoad: Promise<NamespaceToolStatuses> | undefined;
+  const loadStatuses = (): Promise<NamespaceToolStatuses> => {
+    statusesLoad ??= loadNamespaceToolStatuses(namespaceUuid);
+    return statusesLoad;
+  };
+
   const activeTools: Tool[] = [];
 
   await Promise.allSettled(
@@ -379,6 +440,7 @@ async function filterActiveTools(
           parsed.originalToolName,
           policy,
           useCache,
+          loadStatuses,
         );
 
         if (verdict.served) {

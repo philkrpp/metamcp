@@ -202,6 +202,62 @@ class ToolOverridesCache {
 // Global cache instance
 const toolOverridesCache = new ToolOverridesCache();
 
+/** Override columns of one namespace tool mapping, as getToolOverrides reads them. */
+interface ToolOverrideRow {
+  overrideName: string | null;
+  overrideTitle: string | null;
+  overrideDescription: string | null;
+  overrideAnnotations: Record<string, unknown> | null;
+}
+
+const toolOverrideKey = (serverUuid: string, toolName: string): string =>
+  JSON.stringify([serverUuid, toolName]);
+
+/**
+ * Load the override columns of every tool mapping in the namespace in ONE
+ * query, so a listing applies all of its tools' overrides from it instead of
+ * querying once per tool. Same join and filters as the per-tool query, minus
+ * the tool and server, which become the map key.
+ */
+async function loadNamespaceToolOverrides(
+  namespaceUuid: string,
+): Promise<Map<string, ToolOverrideRow>> {
+  const rows = await db
+    .select({
+      serverUuid: namespaceToolMappingsTable.mcp_server_uuid,
+      toolName: toolsTable.name,
+      overrideName: namespaceToolMappingsTable.override_name,
+      overrideTitle: namespaceToolMappingsTable.override_title,
+      overrideDescription: namespaceToolMappingsTable.override_description,
+      overrideAnnotations: namespaceToolMappingsTable.override_annotations,
+    })
+    .from(namespaceToolMappingsTable)
+    .innerJoin(
+      toolsTable,
+      eq(toolsTable.uuid, namespaceToolMappingsTable.tool_uuid),
+    )
+    .where(eq(namespaceToolMappingsTable.namespace_uuid, namespaceUuid));
+
+  const overrides = new Map<string, ToolOverrideRow>();
+  for (const { serverUuid, toolName, ...override } of rows) {
+    const key = toolOverrideKey(serverUuid, toolName);
+    // The per-tool query reads the first matching row; keep the first here too.
+    if (!overrides.has(key)) {
+      overrides.set(key, override);
+    }
+  }
+  return overrides;
+}
+
+/**
+ * What one listing loads once and shares across its tools: the server lookup
+ * per prefix and the namespace's override rows.
+ */
+interface ToolOverridesListingLookups {
+  serversFor: (serverName: string) => Promise<string[]>;
+  loadOverrides: () => Promise<Map<string, ToolOverrideRow>>;
+}
+
 /**
  * Get tool overrides from database with caching
  */
@@ -211,6 +267,7 @@ async function getToolOverrides(
   toolName: string,
   useCache: boolean = true,
   isPersistent: boolean = false,
+  listing?: ToolOverridesListingLookups,
 ): Promise<ToolOverride | null> {
   // Check cache first
   if (useCache) {
@@ -225,10 +282,9 @@ async function getToolOverrides(
     // metatool-ai/metamcp#364, see namespace-server-lookup.ts). Resolved by
     // name alone, the lookup could land on another owner's same-named server,
     // find no mapping row there, and silently drop this namespace's override.
-    const serverUuids = await findNamespaceServerUuidsByName(
-      namespaceUuid,
-      serverName,
-    );
+    const serverUuids = listing
+      ? await listing.serversFor(serverName)
+      : await findNamespaceServerUuidsByName(namespaceUuid, serverName);
 
     if (serverUuids.length !== 1) {
       if (serverUuids.length > 1) {
@@ -245,26 +301,34 @@ async function getToolOverrides(
     }
     const server = { uuid: serverUuids[0] };
 
-    // Query database for tool overrides
-    const [toolMapping] = await db
-      .select({
-        overrideName: namespaceToolMappingsTable.override_name,
-        overrideTitle: namespaceToolMappingsTable.override_title,
-        overrideDescription: namespaceToolMappingsTable.override_description,
-        overrideAnnotations: namespaceToolMappingsTable.override_annotations,
-      })
-      .from(namespaceToolMappingsTable)
-      .innerJoin(
-        toolsTable,
-        eq(toolsTable.uuid, namespaceToolMappingsTable.tool_uuid),
-      )
-      .where(
-        and(
-          eq(namespaceToolMappingsTable.namespace_uuid, namespaceUuid),
-          eq(toolsTable.name, toolName),
-          eq(namespaceToolMappingsTable.mcp_server_uuid, server.uuid),
-        ),
-      );
+    // Query database for tool overrides (a listing loaded them all at once)
+    const [toolMapping] = listing
+      ? [
+          (await listing.loadOverrides()).get(
+            toolOverrideKey(server.uuid, toolName),
+          ),
+        ]
+      : await db
+          .select({
+            overrideName: namespaceToolMappingsTable.override_name,
+            overrideTitle: namespaceToolMappingsTable.override_title,
+            overrideDescription:
+              namespaceToolMappingsTable.override_description,
+            overrideAnnotations:
+              namespaceToolMappingsTable.override_annotations,
+          })
+          .from(namespaceToolMappingsTable)
+          .innerJoin(
+            toolsTable,
+            eq(toolsTable.uuid, namespaceToolMappingsTable.tool_uuid),
+          )
+          .where(
+            and(
+              eq(namespaceToolMappingsTable.namespace_uuid, namespaceUuid),
+              eq(toolsTable.name, toolName),
+              eq(namespaceToolMappingsTable.mcp_server_uuid, server.uuid),
+            ),
+          );
 
     const override: ToolOverride = {
       overrideName: toolMapping?.overrideName || null,
@@ -312,6 +376,26 @@ async function applyToolOverrides(
     return tools;
   }
 
+  // One server lookup per prefix and one override query per listing, made on
+  // first need and shared by every tool. A rejected load stays rejected, so
+  // each tool that needs it falls back to its own catch in getToolOverrides.
+  const serverLookups = new Map<string, Promise<string[]>>();
+  let overridesLoad: Promise<Map<string, ToolOverrideRow>> | undefined;
+  const listing: ToolOverridesListingLookups = {
+    serversFor: (serverName) => {
+      let lookup = serverLookups.get(serverName);
+      if (!lookup) {
+        lookup = findNamespaceServerUuidsByName(namespaceUuid, serverName);
+        serverLookups.set(serverName, lookup);
+      }
+      return lookup;
+    },
+    loadOverrides: () => {
+      overridesLoad ??= loadNamespaceToolOverrides(namespaceUuid);
+      return overridesLoad;
+    },
+  };
+
   const overriddenTools: Tool[] = [];
 
   await Promise.allSettled(
@@ -330,6 +414,7 @@ async function applyToolOverrides(
           parsed.originalToolName,
           useCache,
           isPersistent,
+          listing,
         );
 
         if (!override) {

@@ -188,6 +188,52 @@ describe("mapOverrideNameToOriginal: an alias resolves on its own server", () =>
   });
 });
 
+describe("list: one override query per listing, not one per tool", () => {
+  it("applies N tools' overrides from a single mapping query and one server lookup per prefix", async () => {
+    load({
+      ...bothShareAnAlias(),
+      mappings: [
+        ...bothShareAnAlias().mappings,
+        {
+          namespaceUuid: NS,
+          serverUuid: ALPHA.uuid,
+          toolName: "alpha_plain",
+          status: "ACTIVE",
+        },
+      ],
+    });
+
+    const listed = await createToolOverridesListToolsMiddleware({
+      cacheEnabled: false,
+    })(async () => ({
+      tools: [
+        tool("alpha__alpha_tool"),
+        tool("alpha__alpha_plain"),
+        tool("alpha__unmapped"),
+        tool("beta__beta_tool"),
+        tool("bare"),
+      ],
+    }))({ method: "tools/list", params: {} }, context);
+
+    expect(listed.tools.map((t) => t.name).sort()).toEqual([
+      "alpha__alpha_plain",
+      "alpha__shared",
+      "alpha__unmapped",
+      "bare",
+      "beta__shared",
+    ]);
+    expect(queries.filter((q) => q.table === "mappings")).toEqual([
+      { table: "mappings", where: { "ntm.namespace_uuid": NS } },
+    ]);
+    expect(
+      queries
+        .filter((q) => q.table === "servers")
+        .map((q) => q.where["servers.name"])
+        .sort(),
+    ).toEqual(["alpha", "beta"]);
+  });
+});
+
 describe("createToolOverridesCallToolMiddleware", () => {
   const run = async (name: string) => {
     const handler = vi.fn(async () => ({
