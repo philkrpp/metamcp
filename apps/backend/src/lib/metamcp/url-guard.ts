@@ -835,6 +835,10 @@ export const createPinnedAgent = (
 ): Agent =>
   new Agent({
     connect: { lookup: pinnedLookup(addresses) },
+    // undici 8 negotiates HTTP/2 via ALPN by default. The guard (per-hop
+    // redirect handling, body cap, idle-timeout semantics for SSE) was built
+    // and tested against HTTP/1.1 upstreams, so keep the v7 behaviour.
+    allowH2: false,
     ...(timeouts.headersTimeout !== undefined
       ? { headersTimeout: timeouts.headersTimeout }
       : {}),
