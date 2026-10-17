@@ -114,6 +114,28 @@ run_migrations
 # Converge the runtime role (no-op unless the split is configured)
 ensure_runtime_role
 
+# Child PIDs stay empty until the processes are started, so cleanup is safe
+# to run at any point (including a SIGTERM during startup).
+BACKEND_PID=""
+FRONTEND_PID=""
+
+# Stop whichever children were started
+cleanup() {
+    # Ignore repeated signals while shutting down
+    trap '' TERM INT
+    echo "Shutting down services..."
+    for pid in $BACKEND_PID $FRONTEND_PID; do
+        kill "$pid" 2>/dev/null || true
+    done
+    for pid in $BACKEND_PID $FRONTEND_PID; do
+        wait "$pid" 2>/dev/null || true
+    done
+    echo "Services stopped"
+}
+
+# Graceful shutdown on SIGTERM/SIGINT: stop children, exit 0
+trap 'cleanup; exit 0' TERM INT
+
 # Start backend in the background
 echo "Starting backend server..."
 cd /app/apps/backend
@@ -147,23 +169,22 @@ if ! kill -0 $FRONTEND_PID 2>/dev/null; then
 fi
 echo "✅ Frontend server started successfully (PID: $FRONTEND_PID)"
 
-# Function to cleanup on exit
-cleanup() {
-    echo "Shutting down services..."
-    kill $BACKEND_PID 2>/dev/null || true
-    kill $FRONTEND_PID 2>/dev/null || true
-    wait $BACKEND_PID 2>/dev/null || true
-    wait $FRONTEND_PID 2>/dev/null || true
-    echo "Services stopped"
-}
-
-# Trap signals for graceful shutdown
-trap cleanup TERM INT
-
 echo "Services started successfully!"
 echo "Backend running on port 12009"
 echo "Frontend running on port 12008"
 
-# Wait for both processes
-wait $BACKEND_PID
-wait $FRONTEND_PID 
+# Supervise: exit as soon as EITHER process dies (POSIX sh has no `wait -n`).
+# `sleep & wait $!` instead of a foreground sleep so signals are handled
+# immediately by the trap.
+while kill -0 "$BACKEND_PID" 2>/dev/null && kill -0 "$FRONTEND_PID" 2>/dev/null; do
+    sleep 2 &
+    wait $!
+done
+
+if ! kill -0 "$BACKEND_PID" 2>/dev/null; then
+    echo "❌ Backend server exited unexpectedly! Stopping..."
+else
+    echo "❌ Frontend server exited unexpectedly! Stopping..."
+fi
+cleanup
+exit 1
