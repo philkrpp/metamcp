@@ -5,14 +5,7 @@ import { initializeEnvironmentConfiguration } from "./bootstrap.service";
 import { metaMcpServerPool } from "./metamcp";
 import { serverErrorTracker } from "./metamcp/server-error-tracker";
 import { convertDbServerToParams } from "./metamcp/utils";
-
-function parseBool(value: string | undefined, defaultValue: boolean): boolean {
-  if (value === undefined) return defaultValue;
-  const normalized = value.trim().toLowerCase();
-  if (["1", "true", "yes", "y", "on"].includes(normalized)) return true;
-  if (["0", "false", "no", "n", "off"].includes(normalized)) return false;
-  return defaultValue;
-}
+import { parseBool } from "./parse-bool";
 
 /**
  * Startup initialization that must happen before the HTTP server begins listening.

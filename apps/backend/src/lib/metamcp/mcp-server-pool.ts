@@ -14,6 +14,7 @@ import logger from "@/utils/logger";
 // fully mocked in that test, so this is the only live db import the pool has.
 import { mcpServersRepository } from "../../db/repositories/mcp-servers.repo";
 import { configService } from "../config.service";
+import { parseBool } from "../parse-bool";
 import { ConnectedClient, connectMetaMcpClient } from "./client";
 import { serverRequiresForwardedHeaders } from "./header-forwarding";
 import { serverErrorTracker } from "./server-error-tracker";
@@ -252,6 +253,13 @@ export class McpServerPool {
   // Default number of idle sessions per server UUID
   private readonly defaultIdleCount: number;
 
+  // PREWARM_IDLE_SERVERS (default true, same parsing as startup.ts). When
+  // false the pool never creates idle spares: not at startup, not as a refill
+  // after getSession, not from the health sweep. Connections are made on
+  // demand only. Enforced in createIdleSession / createIdleSessionAsync, the
+  // two places an idle spare is ever created.
+  private readonly prewarmIdleServers: boolean;
+
   // Maximum physical reservations across connects, owners and retirement.
   private readonly maxTotalConnections: number;
 
@@ -284,6 +292,7 @@ export class McpServerPool {
     ),
   ) {
     this.defaultIdleCount = defaultIdleCount;
+    this.prewarmIdleServers = parseBool(process.env.PREWARM_IDLE_SERVERS, true);
     this.maxTotalConnections = maxTotalConnections;
     this.maxConnectionsPerServer = maxConnectionsPerServer;
     this.minConnectionsPerNamespace = Math.max(0, minConnectionsPerNamespace);
@@ -901,6 +910,7 @@ export class McpServerPool {
     // Both checks are synchronous (before any await) so they act as a pre-await
     // mutex, matching the pattern used by createIdleSessionAsync.
     if (
+      !this.prewarmIdleServers ||
       this.cleanupAllPromise ||
       this.isPerSessionServer(params) ||
       this.idleSessions[serverUuid] ||
@@ -962,8 +972,10 @@ export class McpServerPool {
   ): void {
     // Don't create if we already have an idle session or are already creating one
     // (never for per-session servers: an idle connection would carry the
-    // forwarded headers of whichever caller's params are passed here).
+    // forwarded headers of whichever caller's params are passed here), and
+    // never with PREWARM_IDLE_SERVERS=false.
     if (
+      !this.prewarmIdleServers ||
       this.cleanupAllPromise ||
       this.isPerSessionServer(params) ||
       this.idleSessions[serverUuid] ||
