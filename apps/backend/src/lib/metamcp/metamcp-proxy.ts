@@ -26,6 +26,7 @@ import logger from "@/utils/logger";
 import { namespacesRepository } from "../../db/repositories/namespaces.repo";
 import { toolsImplementations } from "../../trpc/tools.impl";
 import { getAdminToolsContext } from "../admin-mcp/admin-session-context";
+import { isEndpointAdminToolsEnabled } from "../admin-mcp/build-admin-tools-options";
 import { configService } from "../config.service";
 import { buildM365BrokerErrorResult } from "../m365/broker-error-result";
 import { isM365BrokerError } from "../m365/errors";
@@ -962,9 +963,14 @@ export const createServer = async (
     // MetaMCP admin tools (endpoint toggle `enable_metamcp_admin_tools`):
     // appended after the middleware chain, so namespace filters/overrides
     // never touch them. The context is set per session by
-    // metamcp-server-pool (applyAdminToolsContext).
+    // metamcp-server-pool (applyAdminToolsContext) at session creation; the
+    // endpoint toggle is re-checked here so disabling it reaches live sessions.
     const adminContext = getAdminToolsContext(handlerContext.sessionId);
-    if (adminContext?.enabled && adminContext.userId) {
+    if (
+      adminContext?.enabled &&
+      adminContext.userId &&
+      (await isEndpointAdminToolsEnabled(adminContext.endpointUuid))
+    ) {
       const { getAdminToolsForMcp } = await loadAdminToolsRegistry();
       result.tools.push(...getAdminToolsForMcp(adminContext));
     }
@@ -975,7 +981,11 @@ export const createServer = async (
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     if (request.params.name.startsWith(ADMIN_TOOL_NAME_PREFIX)) {
       const adminContext = getAdminToolsContext(handlerContext.sessionId);
-      if (!adminContext?.enabled || !adminContext.userId) {
+      if (
+        !adminContext?.enabled ||
+        !adminContext.userId ||
+        !(await isEndpointAdminToolsEnabled(adminContext.endpointUuid))
+      ) {
         throw new Error(
           `Access denied to MetaMCP admin tool: ${request.params.name}`,
         );

@@ -2,6 +2,9 @@ export interface AdminToolsSessionContext {
   enabled: boolean;
   userId: string;
   isAdmin: boolean;
+  // The endpoint whose `enable_metamcp_admin_tools` toggle granted the
+  // binding; re-checked per request so turning it off reaches live sessions.
+  endpointUuid: string;
 }
 
 const adminContextByInternalSessionId = new Map<

@@ -17,6 +17,7 @@ export interface AdminToolsOptions {
   enabled: boolean;
   userId: string;
   isAdmin: boolean;
+  endpointUuid: string;
 }
 
 export interface MetaMcpServerInstance {
