@@ -3,7 +3,7 @@ import {
   OAuthSessionCreateInput,
   OAuthSessionUpdateInput,
 } from "@repo/zod-types";
-import { eq, sql } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 
 import { db } from "../index";
 import { oauthSessionsTable } from "../schema";
@@ -19,6 +19,23 @@ export class OAuthSessionsRepository {
       .limit(1);
 
     return session;
+  }
+
+  /**
+   * The sessions of several servers in one query (at most one row per server:
+   * `mcp_server_uuid` is unique). Servers without a session are simply absent.
+   */
+  async findByMcpServerUuids(
+    mcpServerUuids: string[],
+  ): Promise<DatabaseOAuthSession[]> {
+    if (mcpServerUuids.length === 0) {
+      return [];
+    }
+
+    return db
+      .select()
+      .from(oauthSessionsTable)
+      .where(inArray(oauthSessionsTable.mcp_server_uuid, mcpServerUuids));
   }
 
   async create(input: OAuthSessionCreateInput): Promise<DatabaseOAuthSession> {

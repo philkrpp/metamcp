@@ -65,12 +65,18 @@ export async function getMcpServers(
       )
       .where(and(...whereConditions));
 
+    // Fetch OAuth tokens from OAuth sessions table: one query for all servers
+    // rather than one per server.
+    const oauthSessions = await oauthSessionsRepository.findByMcpServerUuids(
+      servers.map((server) => server.uuid),
+    );
+    const oauthSessionByServer = new Map(
+      oauthSessions.map((session) => [session.mcp_server_uuid, session]),
+    );
+
     const serverDict: Record<string, ServerParameters> = {};
     for (const server of servers) {
-      // Fetch OAuth tokens from OAuth sessions table
-      const oauthSession = await oauthSessionsRepository.findByMcpServerUuid(
-        server.uuid,
-      );
+      const oauthSession = oauthSessionByServer.get(server.uuid);
       let oauthTokens = null;
 
       if (oauthSession && oauthSession.tokens) {
