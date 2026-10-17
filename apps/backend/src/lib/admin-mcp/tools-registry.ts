@@ -1,4 +1,5 @@
 import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
+import type { AuditActor } from "@repo/trpc";
 import {
   BulkImportMcpServersRequestSchema,
   CreateApiKeyRequestSchema,
@@ -34,6 +35,7 @@ import { mcpServersImplementations } from "../../trpc/mcp-servers.impl";
 import { namespacesImplementations } from "../../trpc/namespaces.impl";
 import { oauthImplementations } from "../../trpc/oauth.impl";
 import { toolsImplementations } from "../../trpc/tools.impl";
+import { getCallerContext } from "../metamcp/caller-context-store";
 import { createToolName } from "../metamcp/tool-name-parser";
 import type { AdminToolsActor } from "./resolve-auth-user";
 import { getUserRole } from "./user-role";
@@ -42,6 +44,24 @@ import { zodToMcpInputSchema } from "./zod-to-mcp-schema";
 export const METAMCP_ADMIN_SERVER_PREFIX = "metamcp-admin";
 
 const emptySchema = z.object({});
+
+/**
+ * The audit actor bundle for a write made through an admin tool, so its
+ * `audit_log` row names the calling user instead of reading as `system` (an
+ * absent actor). Same shape a tRPC router builds with `auditActor(ctx)`; the
+ * MCP session carries no e-mail for `actor_label` or user agent, and the IP
+ * and request id come from the request-scoped caller binding when present.
+ */
+function toAuditActor({ userId }: AdminToolsActor): AuditActor {
+  const caller = getCallerContext();
+  return {
+    actor_id: userId,
+    actor_label: null,
+    actor_ip: caller?.callerIp ?? null,
+    actor_user_agent: null,
+    request_id: caller?.requestId ?? null,
+  };
+}
 
 export interface AdminToolDefinition {
   name: string;
@@ -132,37 +152,44 @@ export const ADMIN_TOOLS: AdminToolDefinition[] = [
     "metamcp_create_mcp_server",
     "Create a new upstream MCP server (STDIO, SSE, or STREAMABLE_HTTP).",
     CreateMcpServerRequestSchema,
-    async ({ userId }, input) =>
+    async (actor, input) =>
       mcpServersImplementations.create(
         CreateMcpServerRequestSchema.parse(input),
-        userId,
+        actor.userId,
+        toAuditActor(actor),
       ),
   ),
   defineTool(
     "metamcp_update_mcp_server",
     "Update an existing MCP server configuration.",
     UpdateMcpServerRequestSchema,
-    async ({ userId }, input) =>
+    async (actor, input) =>
       mcpServersImplementations.update(
         UpdateMcpServerRequestSchema.parse(input),
-        userId,
+        actor.userId,
+        toAuditActor(actor),
       ),
   ),
   defineTool(
     "metamcp_delete_mcp_server",
     "Delete an MCP server by UUID.",
     z.object({ uuid: z.string() }),
-    async ({ userId }, input) =>
-      mcpServersImplementations.delete(input as { uuid: string }, userId),
+    async (actor, input) =>
+      mcpServersImplementations.delete(
+        input as { uuid: string },
+        actor.userId,
+        toAuditActor(actor),
+      ),
   ),
   defineTool(
     "metamcp_bulk_import_mcp_servers",
     "Bulk import multiple MCP server configurations.",
     BulkImportMcpServersRequestSchema,
-    async ({ userId }, input) =>
+    async (actor, input) =>
       mcpServersImplementations.bulkImport(
         BulkImportMcpServersRequestSchema.parse(input),
-        userId,
+        actor.userId,
+        toAuditActor(actor),
       ),
   ),
 
@@ -194,57 +221,66 @@ export const ADMIN_TOOLS: AdminToolDefinition[] = [
     "metamcp_create_namespace",
     "Create a new namespace grouping MCP servers.",
     CreateNamespaceRequestSchema,
-    async ({ userId }, input) =>
+    async (actor, input) =>
       namespacesImplementations.create(
         CreateNamespaceRequestSchema.parse(input),
-        userId,
+        actor.userId,
+        toAuditActor(actor),
       ),
   ),
   defineTool(
     "metamcp_update_namespace",
     "Update a namespace name, description, or server membership.",
     UpdateNamespaceRequestSchema,
-    async ({ userId }, input) =>
+    async (actor, input) =>
       namespacesImplementations.update(
         UpdateNamespaceRequestSchema.parse(input),
-        userId,
+        actor.userId,
+        toAuditActor(actor),
       ),
   ),
   defineTool(
     "metamcp_delete_namespace",
     "Delete a namespace by UUID.",
     z.object({ uuid: z.string() }),
-    async ({ userId }, input) =>
-      namespacesImplementations.delete(input as { uuid: string }, userId),
+    async (actor, input) =>
+      namespacesImplementations.delete(
+        input as { uuid: string },
+        actor.userId,
+        toAuditActor(actor),
+      ),
   ),
   defineTool(
     "metamcp_update_namespace_server_status",
     "Enable or disable an MCP server within a namespace.",
     UpdateNamespaceServerStatusRequestSchema,
-    async ({ userId }, input) =>
+    async (actor, input) =>
       namespacesImplementations.updateServerStatus(
         UpdateNamespaceServerStatusRequestSchema.parse(input),
-        userId,
+        actor.userId,
+        toAuditActor(actor),
       ),
   ),
   defineTool(
     "metamcp_update_namespace_tool_status",
     "Enable or disable a specific tool within a namespace.",
     UpdateNamespaceToolStatusRequestSchema,
-    async ({ userId }, input) =>
+    async (actor, input) =>
       namespacesImplementations.updateToolStatus(
         UpdateNamespaceToolStatusRequestSchema.parse(input),
-        userId,
+        actor.userId,
+        toAuditActor(actor),
       ),
   ),
   defineTool(
     "metamcp_update_namespace_tool_overrides",
     "Override tool name, title, description, or annotations in a namespace.",
     UpdateNamespaceToolOverridesRequestSchema,
-    async ({ userId }, input) =>
+    async (actor, input) =>
       namespacesImplementations.updateToolOverrides(
         UpdateNamespaceToolOverridesRequestSchema.parse(input),
-        userId,
+        actor.userId,
+        toAuditActor(actor),
       ),
   ),
   defineTool(
@@ -277,28 +313,34 @@ export const ADMIN_TOOLS: AdminToolDefinition[] = [
     "metamcp_create_endpoint",
     "Create a new public endpoint exposing a namespace.",
     CreateEndpointRequestSchema,
-    async ({ userId }, input) =>
+    async (actor, input) =>
       endpointsImplementations.create(
         CreateEndpointRequestSchema.parse(input),
-        userId,
+        actor.userId,
+        toAuditActor(actor),
       ),
   ),
   defineTool(
     "metamcp_update_endpoint",
     "Update an existing endpoint configuration.",
     UpdateEndpointRequestSchema,
-    async ({ userId }, input) =>
+    async (actor, input) =>
       endpointsImplementations.update(
         UpdateEndpointRequestSchema.parse(input),
-        userId,
+        actor.userId,
+        toAuditActor(actor),
       ),
   ),
   defineTool(
     "metamcp_delete_endpoint",
     "Delete an endpoint by UUID.",
     z.object({ uuid: z.string() }),
-    async ({ userId }, input) =>
-      endpointsImplementations.delete(input as { uuid: string }, userId),
+    async (actor, input) =>
+      endpointsImplementations.delete(
+        input as { uuid: string },
+        actor.userId,
+        toAuditActor(actor),
+      ),
   ),
 
   // API Keys
@@ -312,7 +354,7 @@ export const ADMIN_TOOLS: AdminToolDefinition[] = [
     "metamcp_create_api_key",
     "Create a new API key for MetaMCP authentication.",
     CreateApiKeyRequestSchema,
-    async ({ userId, isAdmin }, input) => {
+    async (actor, input) => {
       const parsed = CreateApiKeyRequestSchema.parse(input);
       // A data-plane credential must not mint control-plane access: admin-plane
       // keys and acts-as identities stay with the admin UI (tRPC).
@@ -321,29 +363,36 @@ export const ADMIN_TOOLS: AdminToolDefinition[] = [
           throw new Error(`${field} keys cannot be created through MCP tools`);
         }
       }
-      return apiKeysImplementations.create(parsed, userId, isAdmin);
+      return apiKeysImplementations.create(
+        parsed,
+        actor.userId,
+        actor.isAdmin,
+        toAuditActor(actor),
+      );
     },
   ),
   defineTool(
     "metamcp_update_api_key",
     "Update an API key name or active status.",
     UpdateApiKeyRequestSchema,
-    async ({ userId, isAdmin }, input) =>
+    async (actor, input) =>
       apiKeysImplementations.update(
         UpdateApiKeyRequestSchema.parse(input),
-        userId,
-        isAdmin,
+        actor.userId,
+        actor.isAdmin,
+        toAuditActor(actor),
       ),
   ),
   defineTool(
     "metamcp_delete_api_key",
     "Delete an API key by UUID.",
     DeleteApiKeyRequestSchema,
-    async ({ userId, isAdmin }, input) =>
+    async (actor, input) =>
       apiKeysImplementations.delete(
         DeleteApiKeyRequestSchema.parse(input),
-        userId,
-        isAdmin,
+        actor.userId,
+        actor.isAdmin,
+        toAuditActor(actor),
       ),
   ),
   definePublicTool(
@@ -365,9 +414,10 @@ export const ADMIN_TOOLS: AdminToolDefinition[] = [
     "metamcp_set_signup_disabled",
     "Enable or disable new user registration.",
     z.object({ disabled: z.boolean() }),
-    async (_actor, input) =>
+    async (actor, input) =>
       configImplementations.setSignupDisabled(
         z.object({ disabled: z.boolean() }).parse(input),
+        toAuditActor(actor),
       ),
   ),
   definePublicTool(
@@ -380,9 +430,10 @@ export const ADMIN_TOOLS: AdminToolDefinition[] = [
     "metamcp_set_sso_signup_disabled",
     "Enable or disable SSO registration.",
     z.object({ disabled: z.boolean() }),
-    async (_actor, input) =>
+    async (actor, input) =>
       configImplementations.setSsoSignupDisabled(
         z.object({ disabled: z.boolean() }).parse(input),
+        toAuditActor(actor),
       ),
   ),
   definePublicTool(
@@ -395,9 +446,10 @@ export const ADMIN_TOOLS: AdminToolDefinition[] = [
     "metamcp_set_basic_auth_disabled",
     "Enable or disable email/password authentication.",
     z.object({ disabled: z.boolean() }),
-    async (_actor, input) =>
+    async (actor, input) =>
       configImplementations.setBasicAuthDisabled(
         z.object({ disabled: z.boolean() }).parse(input),
+        toAuditActor(actor),
       ),
   ),
   definePublicTool(
@@ -472,7 +524,7 @@ export const ADMIN_TOOLS: AdminToolDefinition[] = [
     z.object({
       lifetime: z.number().min(300000).max(86400000).nullable().optional(),
     }),
-    async (_actor, input) =>
+    async (actor, input) =>
       configImplementations.setSessionLifetime(
         z
           .object({
@@ -484,6 +536,7 @@ export const ADMIN_TOOLS: AdminToolDefinition[] = [
               .optional(),
           })
           .parse(input),
+        toAuditActor(actor),
       ),
   ),
   defineTool(
@@ -496,8 +549,11 @@ export const ADMIN_TOOLS: AdminToolDefinition[] = [
     "metamcp_set_config",
     "Set a raw configuration value by key.",
     SetConfigRequestSchema,
-    async (_actor, input) =>
-      configImplementations.setConfig(SetConfigRequestSchema.parse(input)),
+    async (actor, input) =>
+      configImplementations.setConfig(
+        SetConfigRequestSchema.parse(input),
+        toAuditActor(actor),
+      ),
   ),
   definePublicTool(
     "metamcp_get_auth_providers",
@@ -521,15 +577,21 @@ export const ADMIN_TOOLS: AdminToolDefinition[] = [
     "metamcp_save_tools",
     "Upsert tools for an MCP server in the database.",
     CreateToolRequestSchema,
-    async (_actor, input) =>
-      toolsImplementations.create(CreateToolRequestSchema.parse(input)),
+    async (actor, input) =>
+      toolsImplementations.create(
+        CreateToolRequestSchema.parse(input),
+        toAuditActor(actor),
+      ),
   ),
   defineTool(
     "metamcp_sync_tools",
     "Sync tools for an MCP server, removing obsolete entries.",
     CreateToolRequestSchema,
-    async (_actor, input) =>
-      toolsImplementations.sync(CreateToolRequestSchema.parse(input)),
+    async (actor, input) =>
+      toolsImplementations.sync(
+        CreateToolRequestSchema.parse(input),
+        toAuditActor(actor),
+      ),
   ),
 
   // OAuth sessions (upstream MCP servers)
