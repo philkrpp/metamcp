@@ -29,6 +29,8 @@ Resolve conflicts with these rules:
 | Fork-only features | Keep ours: `forward_headers`, `lib/oauth-upstream/**`, `expected_state`, `lib/admin-mcp/**`, pt/es locales, `deploy/**`, `CLIENT_IP_SOURCE`. |
 | `// TEMP(api-key-legacy-scope)` | Keep until the legacy multi-endpoint keys are replaced, then delete the shim and drop `api_key_endpoint_access`. |
 | `prettier` | Pinned to the exact version umbrella's lockfile resolves (now 3.5.3). Newer prettier reformats union types, and reformatting umbrella's files would conflict on every sync. Bump it only together with umbrella. |
+| CompLeadly branding | Keep ours: `apps/frontend/app/favicon.ico`, `apps/frontend/app/icon.png`, `public/compleadly-icon.png`, the `BRANDING_*` / `SOURCE_COMMIT` block in the `Dockerfile` runner stage. Leave `lib/branding.ts` defaults as umbrella has them; our brand comes from the Dockerfile env. |
+| `apps/frontend/lib/app-version.ts` | After the merge, set `UMBRELLA_BASE_COMMIT` to `git merge-base main community/umbrella` (short hash). The sidebar footer shows it. |
 | Everything else | Prefer umbrella's version. |
 
 Then:

@@ -76,6 +76,21 @@ RUN set -e; \
 FROM base AS runner
 WORKDIR /app
 
+# CompLeadly deployment: brand defaults. docker-entrypoint.sh promotes these
+# BRANDING_* aliases to NEXT_PUBLIC_BRANDING_*; a runtime env var of the same
+# name (Coolify, docker run -e) still overrides them. Kept here instead of
+# editing lib/branding.ts so umbrella syncs stay conflict-free.
+ENV BRANDING_PRODUCT_NAME="CompLeadly MCP Gateway" \
+    BRANDING_ORG_NAME="CompLeadly" \
+    BRANDING_LOGO_PATH="/compleadly-icon.png" \
+    BRANDING_DESCRIPTION="CompLeadly's MCP gateway: aggregates MCP servers into curated namespaces for AI tooling."
+
+# Commit the image was built from, shown in the sidebar footer tooltip. The
+# build context excludes .git, so it has to come in as a build arg; Coolify
+# passes SOURCE_COMMIT automatically.
+ARG SOURCE_COMMIT=""
+ENV NEXT_PUBLIC_APP_COMMIT=${SOURCE_COMMIT}
+
 # OCI image labels
 LABEL org.opencontainers.image.source="https://github.com/metatool-ai/metamcp"
 LABEL org.opencontainers.image.description="MetaMCP - aggregates MCP servers into a unified MetaMCP"

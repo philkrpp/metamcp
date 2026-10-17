@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
+import { env } from "next-runtime-env";
 import { useEffect, useState } from "react";
 
 import { LanguageSwitcher } from "@/components/language-switcher";
@@ -38,6 +39,7 @@ import {
 } from "@/components/ui/sidebar";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
 import { useTranslations } from "@/hooks/useTranslations";
+import { formatAppVersion } from "@/lib/app-version";
 import { authClient } from "@/lib/auth-client";
 import { getBranding } from "@/lib/branding";
 import { getLocalizedPath, SupportedLocale } from "@/lib/i18n";
@@ -186,15 +188,22 @@ function UserInfoFooter() {
     window.location.href = "/login";
   };
 
+  const appVersion = formatAppVersion(env("NEXT_PUBLIC_APP_COMMIT"));
+
   return (
     <SidebarFooter>
       <div className="flex flex-col gap-4 p-3">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col gap-2">
           <div className="flex items-center gap-3">
             <LanguageSwitcher />
             <ThemeToggle />
           </div>
-          <p className="text-xs text-muted-foreground">v2.5-ai-dev</p>
+          <p
+            className="truncate font-mono text-xs text-muted-foreground"
+            title={appVersion.title}
+          >
+            {appVersion.label}
+          </p>
         </div>
         <Separator />
         {user && (
