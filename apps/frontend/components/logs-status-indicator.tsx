@@ -6,7 +6,9 @@ import { Badge } from "@/components/ui/badge";
 import { useLogsStore } from "@/lib/stores/logs-store";
 
 export function LogsStatusIndicator() {
-  const { totalCount, isAutoRefreshing } = useLogsStore();
+  // The dot means a poll is running right now, which happens only while the
+  // live-logs page is open; the count is the last one that page fetched.
+  const { totalCount, isPolling: isAutoRefreshing } = useLogsStore();
   const [mounted, setMounted] = useState(false);
 
   // Only render after component mounts to avoid hydration mismatch

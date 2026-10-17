@@ -12,7 +12,7 @@ import { pageHeaderRow } from "@/components/ui/page-header";
 import { useTranslations } from "@/hooks/useTranslations";
 import { authClient } from "@/lib/auth-client";
 import { CATEGORIES, categoryMeta, messageColor } from "@/lib/log-categories";
-import { useLogsStore } from "@/lib/stores/logs-store";
+import { useLogsPolling, useLogsStore } from "@/lib/stores/logs-store";
 
 // The two things this page can show. LIVE is the in-memory ring buffer tailed
 // every 2s — fast, and gone on restart. HISTORY is `gateway_events` (migration
@@ -48,6 +48,8 @@ export default function LiveLogsPage() {
     fetchLogs,
     setAutoRefresh,
   } = useLogsStore();
+  // The store polls only while this page is mounted (and the tab is visible).
+  useLogsPolling();
 
   // Resolved for the HISTORY view only. `logs.history` is an adminProcedure,
   // and `enabled: isAdmin` keeps a member from firing a query that could only
