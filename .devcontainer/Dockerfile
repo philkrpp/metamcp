@@ -1,20 +1,29 @@
 # DevContainer Dockerfile optimized for VS Code development
+FROM node:24-bookworm-slim AS node-runtime
+
 FROM ghcr.io/astral-sh/uv:debian AS base
 
-# Install Node.js, pnpm, and common development tools
+# Keep the existing tools and provide Node shared libraries from this base.
 RUN apt-get update && apt-get install -y \
     curl \
     gnupg \
+    libstdc++6 libatomic1 \
     git \
     vim \
     nano \
     postgresql-client \
     ca-certificates \
-    && curl -fsSL https://deb.nodesource.com/setup_24.x | bash - \
-    && apt-get install -y nodejs \
-    && npm install -g pnpm@10.34.1 \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
+
+# Copy the Node runtime without replacing Python/uv or importing Yarn symlinks.
+COPY --from=node-runtime /usr/local/bin/node /usr/local/bin/node
+COPY --from=node-runtime /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/npm
+COPY --from=node-runtime /usr/local/include/node /usr/local/include/node
+RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
+    && ln -s ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx
+
+RUN npm install -g pnpm@10.34.1
 
 # Install Docker CLI for container management (useful for devcontainer)
 RUN apt-get update && apt-get install -y \

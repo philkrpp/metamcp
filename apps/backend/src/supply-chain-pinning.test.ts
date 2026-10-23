@@ -6,7 +6,8 @@
  * packages:write and id-token:write, or shift the deployed image out from
  * under a digest nobody reviewed. So every `uses:` in .github/workflows is
  * pinned to a full 40-char commit SHA, the root Dockerfile base image is
- * pinned to a sha256 digest, and its Node install names an exact version.
+ * pinned to a sha256 digest. The approved Node 24 source stage stays mutable
+ * so builds with pull enabled receive current Node 24 releases.
  * This reads those files from source and fails the moment any of them drifts
  * back to a moving reference, including in a workflow added later. Same
  * source-reading technique as the cors() call-site guard in
@@ -67,7 +68,7 @@ describe("supply-chain pinning", () => {
     }
   });
 
-  it("digest-pins every external Dockerfile base image", () => {
+  it("digest-pins external base images except the approved Node 24 source", () => {
     const dockerfile = readFileSync(DOCKERFILE, "utf8");
     // `FROM base AS ...` re-references an internal stage, not a registry
     // image; only external images need a digest.
@@ -82,18 +83,24 @@ describe("supply-chain pinning", () => {
 
     expect(external.length).toBeGreaterThanOrEqual(1);
     for (const img of external) {
+      if (img === "node:24-bookworm-slim") continue;
       expect(img, `Dockerfile FROM ${img} is not digest-pinned`).toMatch(
         /@sha256:[0-9a-f]{64}$/,
       );
     }
   });
 
-  it("pins the Dockerfile Node install to an exact version", () => {
+  it("copies Node 24 from the approved source stage instead of cached apt", () => {
     const dockerfile = readFileSync(DOCKERFILE, "utf8");
-    // Bare `apt-get install -y nodejs` takes whatever 20.x is current at
-    // build time; the pinned form names the nodesource version explicitly.
-    expect(dockerfile, "Dockerfile installs a floating nodejs").toMatch(
-      /apt-get install -y nodejs=\d+\.\d+\.\d+/,
+    expect(dockerfile).toMatch(/^FROM node:24-bookworm-slim AS node-runtime$/m);
+    expect(dockerfile).toMatch(
+      /^COPY --from=node-runtime \/usr\/local\/bin\/node \/usr\/local\/bin\/node$/m,
+    );
+    expect(dockerfile).toMatch(
+      /^COPY --from=node-runtime \/usr\/local\/lib\/node_modules\/npm \/usr\/local\/lib\/node_modules\/npm$/m,
+    );
+    expect(dockerfile).not.toMatch(
+      /deb\.nodesource\.com|apt-get install[^\n]*\bnodejs\b/,
     );
   });
 

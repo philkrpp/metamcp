@@ -135,6 +135,7 @@ jobs:
         uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25 # v5.4.0
         with:
           context: .
+          pull: true
           # The deploy host is amd64-only; arm64 cross-build doubles CI time
           # for an artifact nothing consumes. Re-add if we ever publish for
           # a community arm64 host.

@@ -2,6 +2,7 @@ services:
   app:
     container_name: metamcp-dev
     build:
+      pull: true
       context: .
       dockerfile: Dockerfile.dev
     env_file:

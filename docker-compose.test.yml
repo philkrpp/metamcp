@@ -2,6 +2,7 @@ services:
   app:
     container_name: metamcp
     build:
+      pull: true
       context: .
       dockerfile: Dockerfile
     pull_policy: always

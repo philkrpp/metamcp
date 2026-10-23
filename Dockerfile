@@ -1,4 +1,6 @@
 # syntax=docker/dockerfile:1
+FROM node:24-bookworm-slim AS node-runtime
+
 # Base image: the official uv image, digest-pinned so the build is
 # reproducible and the base layer cannot shift under us between builds. The
 # :debian tag is kept for human context; the @sha256 index digest is what
@@ -6,19 +8,22 @@
 # .github/dependabot.yml), which opens a reviewable PR when the tag moves.
 FROM ghcr.io/astral-sh/uv:debian@sha256:b2b767dc8bbe5b9f813ca4958a43cc8421ca8eab6c954c74e5b1e641fea7a6ad AS base
 
-# Install Node.js and pnpm directly. nodejs is pinned to an exact nodesource
-# version so the image ships a known Node build instead of "whatever 24.x is
-# current at build time"; bump it by hand when moving Node (Dependabot's
-# docker ecosystem tracks the base image digest, not apt package versions
-# inside RUN layers). pnpm is already version-pinned.
+# Keep the existing tools and provide Node shared libraries from this base.
 RUN apt-get update && apt-get install -y \
     curl \
     gnupg \
-    && curl -fsSL https://deb.nodesource.com/setup_24.x | bash - \
-    && apt-get install -y nodejs=24.16.0-1nodesource1 \
-    && npm install -g pnpm@10.34.1 \
+    libstdc++6 libatomic1 \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
+
+# Copy the Node runtime without replacing Python/uv or importing Yarn symlinks.
+COPY --from=node-runtime /usr/local/bin/node /usr/local/bin/node
+COPY --from=node-runtime /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/npm
+COPY --from=node-runtime /usr/local/include/node /usr/local/include/node
+RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
+    && ln -s ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx
+
+RUN npm install -g pnpm@10.34.1
 
 # Install dependencies only when needed
 FROM base AS deps
