@@ -152,6 +152,11 @@ COPY --from=builder --chown=nextjs:nodejs /app/pnpm-lock.yaml ./
 RUN --mount=type=cache,target=/pnpm/store \
     CI=1 pnpm install --prod --frozen-lockfile --config.confirmModulesPurge=false --store-dir=/pnpm/store
 
+# pnpm 12 runs an install before `pnpm exec`/`pnpm start` by default. As the non-root runtime
+# user that install cannot relink the root-owned node_modules, fails, and leaves drizzle-kit
+# unable to load drizzle-orm, so the entrypoint's migration aborts. The install above is final.
+ENV PNPM_CONFIG_VERIFY_DEPS_BEFORE_RUN=false
+
 # Copy startup script
 COPY --chown=nextjs:nodejs docker-entrypoint.sh ./
 RUN chmod +x docker-entrypoint.sh
