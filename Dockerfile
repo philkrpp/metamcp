@@ -23,7 +23,7 @@ COPY --from=node-runtime /usr/local/include/node /usr/local/include/node
 RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
     && ln -s ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx
 
-RUN npm install -g pnpm@10.34.1
+RUN npm install -g pnpm@12.15.0
 
 # Install dependencies only when needed
 FROM base AS deps

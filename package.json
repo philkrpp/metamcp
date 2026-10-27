@@ -19,19 +19,9 @@
     "turbo": "^2.9.18",
     "typescript": "^6.0.3"
   },
-  "packageManager": "pnpm@10.34.1",
+  "packageManager": "pnpm@12.15.0",
   "engines": {
     "node": "24.x",
     "pnpm": ">=10"
-  },
-  "pnpm": {
-    "overrides": {
-      "esbuild@<0.25.0": "^0.25.0"
-    },
-    "onlyBuiltDependencies": [
-      "esbuild",
-      "@tailwindcss/oxide",
-      "sharp"
-    ]
   }
 }
