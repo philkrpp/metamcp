@@ -53,3 +53,9 @@ compose.override.yml
 # a test run from the repo root must not leave them tracked.
 /app.log*
 /error.log*
+
+# Local agent and tool artifacts
+.playwright-mcp/
+.superpowers/
+.worktrees/
+.lighthouseci/
