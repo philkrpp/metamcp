@@ -1,12 +1,12 @@
 /**
- * The namespace forms offer only the ownership the backend actually applies
- * (TASKLIST METAMCP-NO-PRIVATE-NAMESPACES). The create form used to offer
- * "For myself", which sent no owner; the backend stores that as public, so the
- * option promised a private namespace and silently made a public one.
+ * The namespace forms offer only the ownership the backend actually applies.
+ * The create form offers "For myself" (no owner sent; the backend makes the
+ * creator the owner) and "Everyone" (null, public), defaulting to private so
+ * private MCP servers can be grouped into a new namespace.
  *
  * The forms render client-side React this suite cannot mount (node
  * environment, no DOM), so the decision lives in a pure helper tested here,
- * and the create page's source is pinned so the option cannot quietly return.
+ * and the create page's source is pinned.
  */
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -45,9 +45,10 @@ describe("the create form", () => {
     "utf8",
   );
 
-  it("no longer offers 'For myself'", () => {
-    expect(page).not.toContain("namespaces:forMyself");
-    expect(page).not.toContain('setValue("user_id", undefined)');
+  it("offers 'For myself' and defaults to it", () => {
+    expect(page).toContain('t("namespaces:forMyself")');
+    expect(page).toContain('setValue("user_id", undefined)');
+    expect(page).not.toContain("user_id: null, // Default to public");
   });
 
   it("states the ownership it applies", () => {

@@ -5,7 +5,7 @@ import {
   createNamespaceFormSchema,
   CreateNamespaceRequest,
 } from "@repo/zod-types";
-import { Package, Plus, Search } from "lucide-react";
+import { ChevronDown, Package, Plus, Search } from "lucide-react";
 import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
@@ -19,6 +19,12 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/ui/page-header";
 import { Textarea } from "@/components/ui/textarea";
@@ -69,7 +75,7 @@ export default function NamespacesPage() {
         form.reset({
           name: "",
           description: "",
-          user_id: null, // Default to public (Everyone)
+          user_id: undefined, // default PRIVATE (owned by the creator); the ownership selector below opts in to public (Everyone)
         });
         setSelectedServerUuids([]);
         setServerSearchQuery("");
@@ -97,7 +103,7 @@ export default function NamespacesPage() {
       name: "",
       description: "",
       mcpServerUuids: [],
-      user_id: null, // Default to public (Everyone)
+      user_id: undefined, // default PRIVATE (owned by the creator); the ownership selector below opts in to public (Everyone)
     },
   });
 
@@ -187,19 +193,44 @@ export default function NamespacesPage() {
                   />
                 </div>
 
-                {/* Fixed, not a choice: a new namespace is always public
-                    (user_id null). The "For myself" option this replaced sent
-                    no owner, which the backend also stores as public, so it
-                    promised privacy it never delivered. See
-                    lib/namespace-ownership.ts. */}
+                {/* "For myself" sends no owner, which the backend stores as
+                    owned by the creator (private); "Everyone" sends null
+                    (public). See lib/namespace-ownership.ts. */}
                 <div className="flex flex-col gap-2">
                   <label className="text-sm font-medium">
                     {t("namespaces:ownership")}
                   </label>
-                  <p className="text-sm">{t("namespaces:everyone")}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {t("namespaces:ownershipPublicNote")}
-                  </p>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        variant="outline"
+                        className="w-full justify-between"
+                        type="button"
+                      >
+                        {form.watch("user_id") === null
+                          ? t("namespaces:everyone")
+                          : t("namespaces:forMyself")}
+                        <ChevronDown className="h-4 w-4" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent className="w-[var(--radix-dropdown-menu-trigger-width)] min-w-[var(--radix-dropdown-menu-trigger-width)]">
+                      <DropdownMenuItem
+                        onClick={() => form.setValue("user_id", undefined)}
+                      >
+                        {t("namespaces:forMyself")}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onClick={() => form.setValue("user_id", null)}
+                      >
+                        {t("namespaces:everyone")}
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                  {form.watch("user_id") === null && (
+                    <p className="text-xs text-muted-foreground">
+                      {t("namespaces:ownershipPublicNote")}
+                    </p>
+                  )}
                 </div>
 
                 <div className="flex flex-col gap-2">
@@ -278,7 +309,7 @@ export default function NamespacesPage() {
                       form.reset({
                         name: "",
                         description: "",
-                        user_id: null, // Default to public (Everyone)
+                        user_id: undefined, // default PRIVATE (owned by the creator); the ownership selector below opts in to public (Everyone)
                       });
                       setSelectedServerUuids([]);
                       setServerSearchQuery("");

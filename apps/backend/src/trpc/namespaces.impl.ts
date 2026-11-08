@@ -46,10 +46,19 @@ export const namespacesImplementations = {
     actor?: AuditActor,
   ): Promise<z.infer<typeof CreateNamespaceResponseSchema>> => {
     try {
-      // Determine user ownership based on input.user_id or default to current user
+      // No explicit owner means the creator owns it (private), as for
+      // endpoints; only an explicit null makes the namespace public.
       const effectiveUserId =
-        input.user_id !== undefined ? input.user_id : null;
+        input.user_id !== undefined ? input.user_id : userId;
       const isPublicNamespace = effectiveUserId === null;
+
+      if (effectiveUserId !== null && effectiveUserId !== userId) {
+        return {
+          success: false as const,
+          message:
+            "Access denied: A namespace can only be owned by its creator or be public",
+        };
+      }
 
       // Validate server accessibility and relationship rules
       if (input.mcpServerUuids && input.mcpServerUuids.length > 0) {
