@@ -85,7 +85,7 @@ WORKDIR /app
 # BRANDING_* aliases to NEXT_PUBLIC_BRANDING_*; a runtime env var of the same
 # name (Coolify, docker run -e) still overrides them. Kept here instead of
 # editing lib/branding.ts so umbrella syncs stay conflict-free.
-ENV BRANDING_PRODUCT_NAME="CompLeadly MCP Gateway" \
+ENV BRANDING_PRODUCT_NAME="MetaMCP" \
     BRANDING_ORG_NAME="CompLeadly" \
     BRANDING_LOGO_PATH="/compleadly-icon.png" \
     BRANDING_DESCRIPTION="CompLeadly's MCP gateway: aggregates MCP servers into curated namespaces for AI tooling."
