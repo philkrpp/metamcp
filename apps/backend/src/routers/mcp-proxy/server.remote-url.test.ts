@@ -540,6 +540,82 @@ describe("remote transports — whose row may supply the stored headers", () => 
   });
 });
 
+/**
+ * The row's stored `bearerToken`. The serializer redacts it to null for the
+ * browser, so the Inspector can never send it itself; without the proxy
+ * attaching it server-side, every bearer-protected server shows
+ * "Connection Error" in the UI while the pool (which does attach it) works.
+ */
+describe("remote transports — the row's stored bearer token", () => {
+  const HTTP_URL = "https://bearer.example.com/mcp";
+  const row = (overrides: Record<string, unknown> = {}) => ({
+    uuid: "eeeeeeee-5555-4555-8555-eeeeeeeeeeee",
+    name: "bearer-row",
+    type: "STREAMABLE_HTTP",
+    url: HTTP_URL,
+    headers: {},
+    bearerToken: "stored-token",
+    user_id: CALLER.id,
+    error_status: null,
+    ...overrides,
+  });
+  const streamableHeaders = () =>
+    streamableClientConstructions[0]?.opts?.requestInit?.headers;
+
+  it("attaches an accessible row's bearer token as Authorization", async () => {
+    findAllAccessibleToUserMock.mockResolvedValue([row()]);
+
+    await postMcp({ transportType: "STREAMABLE_HTTP", url: HTTP_URL });
+
+    expect(streamableHeaders().authorization).toBe("Bearer stored-token");
+  });
+
+  it("attaches it on SSE too", async () => {
+    const sseUrl = "https://bearer.example.com/sse";
+    findAllAccessibleToUserMock.mockResolvedValue([
+      row({ type: "SSE", url: sseUrl }),
+    ]);
+
+    await getSse({ transportType: "SSE", url: sseUrl });
+
+    expect(sseHeaders().authorization).toBe("Bearer stored-token");
+  });
+
+  it("lets a request-supplied Authorization win", async () => {
+    findAllAccessibleToUserMock.mockResolvedValue([row()]);
+
+    await postMcp({ transportType: "STREAMABLE_HTTP", url: HTTP_URL }, CALLER, {
+      authorization: "Bearer from-request",
+    });
+
+    expect(streamableHeaders().authorization).toBe("Bearer from-request");
+  });
+
+  it("does not override an Authorization stored in the row headers", async () => {
+    findAllAccessibleToUserMock.mockResolvedValue([
+      row({ headers: { Authorization: "Basic stored-basic" } }),
+    ]);
+
+    await postMcp({ transportType: "STREAMABLE_HTTP", url: HTTP_URL });
+
+    expect(streamableHeaders().Authorization).toBe("Basic stored-basic");
+    expect(streamableHeaders().authorization).toBeUndefined();
+  });
+
+  it("does NOT attach another user's private row bearer token", async () => {
+    findAllAccessibleToUserMock.mockImplementation(async (userId: string) =>
+      [row({ user_id: "user-someone-else" })].filter(
+        (r) => r.user_id === userId,
+      ),
+    );
+
+    await postMcp({ transportType: "STREAMABLE_HTTP", url: HTTP_URL });
+
+    expect(streamableClientConstructions).toHaveLength(1);
+    expect(JSON.stringify(streamableHeaders())).not.toContain("stored-token");
+  });
+});
+
 describe("the SSE connect log", () => {
   it("records origin and path but NEVER the query string", async () => {
     // Hosted MCP servers routinely carry the credential in the query

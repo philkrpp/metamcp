@@ -31,6 +31,7 @@ import {
   refuseDeclaredOversize,
 } from "../../lib/metamcp/mcp-request-body-limit";
 import { mcpServerPool } from "../../lib/metamcp/mcp-server-pool";
+import { resolveServerBearerToken } from "../../lib/metamcp/server-bearer-crypto";
 import {
   getDefaultEnvironment,
   resolveEnvVariables,
@@ -394,6 +395,35 @@ const getHttpHeaders = (
   return headers;
 };
 
+/**
+ * Outbound headers for a remote Inspector connection: the row's stored
+ * `headers`, the request's passthrough headers, and the row's stored bearer
+ * token as `Authorization` when neither already carries one.
+ *
+ * The serializer redacts `bearerToken` for the browser, so the Inspector can
+ * never send it itself; the pool attaches it the same way (client.ts). Only a
+ * row from `findAccessibleRemoteServer` is passed in, so another user's private
+ * credential never travels.
+ */
+const buildRemoteHeaders = (
+  req: express.Request,
+  transportType: string,
+  matchingServer: DatabaseMcpServer | undefined,
+): Record<string, string> => {
+  const headers: Record<string, string> = {
+    ...(matchingServer?.headers || {}),
+    ...getHttpHeaders(req, transportType),
+  };
+  const hasAuthorization = Object.keys(headers).some(
+    (key) => key.toLowerCase() === "authorization",
+  );
+  if (!hasAuthorization) {
+    const token = resolveServerBearerToken(matchingServer?.bearerToken);
+    if (token) headers.authorization = `Bearer ${token}`;
+  }
+  return headers;
+};
+
 const serverRouter = express.Router();
 
 // Auth (session) and authorization (admin-only) are applied once by the
@@ -585,11 +615,7 @@ const createTransport = async (req: express.Request): Promise<Transport> => {
       );
     }
 
-    // Merge custom headers from database with passthrough headers from request
-    const headers = {
-      ...(matchingServer?.headers || {}),
-      ...getHttpHeaders(req, transportType),
-    };
+    const headers = buildRemoteHeaders(req, transportType, matchingServer);
 
     // Header NAMES only. `headers` is the row's stored `headers` jsonb merged
     // with the request's passthrough `authorization`, so stringifying the whole
@@ -660,11 +686,7 @@ const createTransport = async (req: express.Request): Promise<Transport> => {
       );
     }
 
-    // Merge custom headers from database with passthrough headers from request
-    const headers = {
-      ...(matchingServer?.headers || {}),
-      ...getHttpHeaders(req, transportType),
-    };
+    const headers = buildRemoteHeaders(req, transportType, matchingServer);
 
     // Covers the transport's own reconnects and every redirect hop, which the
     // one-shot check above cannot reach.
