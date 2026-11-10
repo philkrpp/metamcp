@@ -1255,6 +1255,15 @@ function checkOAuthAccess(
     return { allowed: true };
   }
 
+  // Restricted endpoint: who may enter is decided by `refuseByAccessGroup`,
+  // which both call sites run right after this and which admits only admins
+  // and granted members (failing closed). Without this, an owner's private
+  // endpoint refused every granted member on ownership first, so access groups
+  // only worked on public endpoints.
+  if (endpoint.restricted) {
+    return { allowed: true };
+  }
+
   if (endpoint.user_id === oauthResult.user_id) {
     // Private endpoint owned by the user - allowed
     return { allowed: true };

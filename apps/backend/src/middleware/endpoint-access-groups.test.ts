@@ -331,6 +331,47 @@ describe("who gets through", () => {
   });
 });
 
+describe("a PRIVATE restricted endpoint is decided by the group gate, not ownership", () => {
+  // Owner-created endpoints are private (user_id set). Without this, a granted
+  // member was refused on ownership before the group gate ever ran, so access
+  // groups could only ever be used on public endpoints.
+  const privateRestricted = () =>
+    makeEndpoint({ restricted: true, user_id: OTHER_USER_ID });
+
+  it("serves a granted member on an endpoint owned by someone else", async () => {
+    findRoleByIdMock.mockResolvedValue("member");
+    hasEndpointGrantMock.mockResolvedValue(true);
+
+    const { served, res } = await asOAuthUser(USER_ID, privateRestricted());
+
+    expect(served).toBe(true);
+    expect(res.statusCode).toBe(200);
+  });
+
+  it("refuses a non-member there through the group gate", async () => {
+    findRoleByIdMock.mockResolvedValue("member");
+    hasEndpointGrantMock.mockResolvedValue(false);
+
+    const { served, res } = await asOAuthUser(USER_ID, privateRestricted());
+
+    expect(served).toBe(false);
+    expect(res.statusCode).toBe(403);
+    expect(hasEndpointGrantMock).toHaveBeenCalled();
+  });
+
+  it("still refuses a non-owner on a private endpoint that is NOT restricted", async () => {
+    hasEndpointGrantMock.mockResolvedValue(true);
+
+    const { served, res } = await asOAuthUser(
+      USER_ID,
+      makeEndpoint({ restricted: false, user_id: OTHER_USER_ID }),
+    );
+
+    expect(served).toBe(false);
+    expect(res.statusCode).toBe(403);
+  });
+});
+
 describe("an endpoint that has not opted in is unchanged", () => {
   it("serves the OAuth caller and touches NEITHER the role nor the grant query", async () => {
     const { served, res } = await asOAuthUser(
