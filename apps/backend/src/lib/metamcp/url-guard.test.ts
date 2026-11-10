@@ -314,6 +314,38 @@ describe("assertPublicMcpUrl — the allowlist escape hatch", () => {
       }),
     ).rejects.toThrow(NOT_A_PERMITTED_TARGET);
   });
+
+  it("lets a *.domain entry allow subdomains at any depth", async () => {
+    process.env.MCP_PROXY_URL_ALLOWED_HOSTS = " *.Example.com ";
+    const lookup = resolvesTo("10.0.0.5");
+    for (const host of ["mcp.example.com", "a.b.example.com"]) {
+      const { url } = await assertPublicMcpUrl(`https://${host}/mcp`, {
+        lookup,
+      });
+      expect(url.hostname).toBe(host);
+    }
+    expect(lookup).not.toHaveBeenCalled();
+  });
+
+  it("does not let a *.domain entry allow the apex or a look-alike", async () => {
+    for (const host of ["example.com", "evilexample.com", "example.com.evil"]) {
+      await expect(
+        assertPublicMcpUrl(`https://${host}/mcp`, {
+          lookup: resolvesTo("10.0.0.5"),
+          allowedHosts: ["*.example.com"],
+        }),
+      ).rejects.toThrow(NOT_A_PERMITTED_TARGET);
+    }
+  });
+
+  it("ignores a bare * entry instead of allowing everything", async () => {
+    await expect(
+      assertPublicMcpUrl("https://internal.example.com/mcp", {
+        lookup: resolvesTo("10.0.0.5"),
+        allowedHosts: ["*", "*."],
+      }),
+    ).rejects.toThrow(NOT_A_PERMITTED_TARGET);
+  });
 });
 
 describe("createGuardedFetch", () => {

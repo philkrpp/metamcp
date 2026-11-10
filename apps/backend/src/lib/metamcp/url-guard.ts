@@ -462,6 +462,9 @@ const normalizeHostname = (value: string): string => {
  * `TRANSFORM_LOCALHOST_TO_DOCKER_INTERNAL=true`, where a `localhost` URL is
  * rewritten to `host.docker.internal` and therefore resolves into the Docker
  * bridge network.
+ *
+ * An entry `*.example.com` allows every subdomain of `example.com` at any
+ * depth, but not `example.com` itself. A bare `*` or `*.` allows nothing.
  */
 const allowedHostsFromEnv = (): ReadonlySet<string> =>
   new Set(
@@ -470,6 +473,19 @@ const allowedHostsFromEnv = (): ReadonlySet<string> =>
       .map(normalizeHostname)
       .filter((host) => host.length > 0),
   );
+
+const isAllowedHost = (
+  hostname: string,
+  allowedHosts: ReadonlySet<string>,
+): boolean => {
+  if (allowedHosts.has(hostname)) return true;
+  for (const entry of allowedHosts) {
+    if (!entry.startsWith("*.")) continue;
+    const suffix = entry.slice(1); // ".example.com"
+    if (suffix.length > 1 && hostname.endsWith(suffix)) return true;
+  }
+  return false;
+};
 
 /**
  * Resolve through getaddrinfo, NOT through `dns.resolve4`/`resolve6`.
@@ -745,7 +761,7 @@ export const assertPublicMcpUrl = async (
     : allowedHostsFromEnv();
   // No addresses: an allowlisted host is trusted by NAME, so there is nothing
   // to pin it to and the connection resolves normally.
-  if (allowedHosts.has(hostname)) return { url, addresses: [] };
+  if (isAllowedHost(hostname, allowedHosts)) return { url, addresses: [] };
 
   // An IP literal needs no resolver. WHATWG URL parsing has already normalised
   // every alternate IPv4 spelling for us — `http://2130706433/`,
