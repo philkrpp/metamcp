@@ -30,6 +30,8 @@ import {
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { useTranslations } from "@/hooks/useTranslations";
+import { authClient } from "@/lib/auth-client";
+import { privateServerOwner } from "@/lib/server-ownership";
 import { trpc } from "@/lib/trpc";
 import { createTranslatedZodResolver } from "@/lib/zod-resolver";
 
@@ -47,7 +49,17 @@ export function EditMcpServer({
   onSuccess,
 }: EditMcpServerProps) {
   const [isUpdating, setIsUpdating] = useState(false);
+  const [currentUserId, setCurrentUserId] = useState<string | undefined>();
   const { t } = useTranslations();
+
+  // "Private" must name an owner; a public server is claimed by this user.
+  useEffect(() => {
+    authClient
+      .getSession()
+      .then((session) => setCurrentUserId(session?.data?.user?.id))
+      .catch(() => setCurrentUserId(undefined));
+  }, []);
+  const privateOwner = privateServerOwner(server?.user_id, currentUserId);
 
   // Get tRPC utils for cache invalidation
   const utils = trpc.useUtils();
@@ -457,7 +469,8 @@ export function EditMcpServer({
               </DropdownMenuTrigger>
               <DropdownMenuContent className="w-[var(--radix-dropdown-menu-trigger-width)] min-w-[var(--radix-dropdown-menu-trigger-width)]">
                 <DropdownMenuItem
-                  onClick={() => editForm.setValue("user_id", undefined)}
+                  disabled={privateOwner === undefined}
+                  onClick={() => editForm.setValue("user_id", privateOwner)}
                 >
                   {t("mcp-servers:private")}
                 </DropdownMenuItem>
