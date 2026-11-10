@@ -6,7 +6,6 @@ import {
   KeyRound,
   Link as LinkIcon,
   Package,
-  Search,
   SearchCode,
   Server,
   Settings,
@@ -44,13 +43,10 @@ import { authClient } from "@/lib/auth-client";
 import { getBranding } from "@/lib/branding";
 import { getLocalizedPath, SupportedLocale } from "@/lib/i18n";
 
-// Menu items function - now takes locale parameter
+// Menu items function - now takes locale parameter.
+// "Explore MCP Servers" (/search) is hidden on purpose: servers are added by
+// admins from known sources only. The page stays reachable by URL.
 const getMenuItems = (t: (key: string) => string, locale: SupportedLocale) => [
-  {
-    title: t("navigation:exploreMcpServers"),
-    url: getLocalizedPath("/search", locale),
-    icon: Search,
-  },
   {
     title: t("navigation:mcpServers"),
     url: getLocalizedPath("/mcp-servers", locale),
